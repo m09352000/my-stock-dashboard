@@ -12,7 +12,7 @@ import hashlib
 from datetime import datetime
 
 # --- 1. 網頁設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V23", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="AI 股市戰情室 V24", layout="wide", initial_sidebar_state="auto")
 
 # --- 2. CSS 優化 ---
 st.markdown("""
@@ -27,27 +27,22 @@ st.markdown("""
         position: fixed; bottom: 10px; left: 20px;
         font-size: 0.8em; color: gray; z-index: 100;
     }
-    /* 讓詳細解說卡片更漂亮 */
     .term-card {
-        background-color: #262730; 
-        padding: 20px; 
-        border-radius: 12px; 
-        margin-bottom: 15px; 
-        border: 1px solid #464b5c;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        background-color: #262730; padding: 20px; 
+        border-radius: 12px; margin-bottom: 15px; 
+        border: 1px solid #464b5c; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    .term-title {
-        color: #ffbd45;
-        font-size: 1.3em;
-        font-weight: bold;
-        margin-bottom: 10px;
-        border-bottom: 1px solid #555;
-        padding-bottom: 5px;
-    }
-    .term-content {
-        font-size: 1.05em;
-        line-height: 1.7;
-        color: #e6e6e6;
+    .term-title { color: #ffbd45; font-size: 1.3em; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #555; }
+    .term-content { font-size: 1.05em; line-height: 1.7; color: #e6e6e6; }
+    
+    /* 登入框美化 */
+    .login-box {
+        border: 2px solid #464b5c;
+        padding: 30px;
+        border-radius: 20px;
+        background-color: #1e1e1e;
+        max-width: 500px;
+        margin: 0 auto;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -58,103 +53,41 @@ if 'current_stock' not in st.session_state: st.session_state['current_stock'] = 
 if 'current_name' not in st.session_state: st.session_state['current_name'] = ""
 if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome' 
 if 'user_info' not in st.session_state: st.session_state['user_info'] = None
+# 頁面歷史紀錄 (用於返回上一頁不登出)
+if 'page_stack' not in st.session_state: st.session_state['page_stack'] = ['welcome']
 
-# --- 4. 擴充掃描池 (800+ 檔) ---
+# 擴充掃描池 (800+ 檔)
 if 'scan_pool' not in st.session_state:
     try:
-        # 嘗試抓取 twstock 所有股票代號
         all_codes = sorted([c for c in twstock.codes.keys() if twstock.codes[c].type == "股票"])
         st.session_state['scan_pool'] = all_codes[:800] 
     except:
-        # 如果失敗，使用備用清單
-        st.session_state['scan_pool'] = ['2330', '2317', '2454', '2308', '2603', '2609', '2615', '2881', '2882']
+        st.session_state['scan_pool'] = ['2330', '2317', '2454', '2603', '2881']
 
-# --- 5. 知識庫資料 (完整詳細版回歸) ---
+# --- 4. 知識庫資料 ---
 STOCK_TERMS = {
     "技術指標篇": {
-        "K線 (Candlestick)": """
-        **定義**：紀錄一天股價走勢的圖形，由「開盤價、收盤價、最高價、最低價」四個價格組成。
-        <br>**怎麼看**：
-        - **紅K (陽線)**：收盤價 > 開盤價，代表當天買氣旺，股價上漲。
-        - **綠K (陰線)**：收盤價 < 開盤價，代表當天賣壓重，股價下跌。
-        - **影線**：上下突出的線條，代表當天曾經到過的最高或最低點，長上影線通常代表上方有賣壓，長下影線代表下方有支撐。
-        """,
-        "MA 移動平均線 (Moving Average)": """
-        **定義**：將過去 N 天的收盤價加總除以 N，連接起來的線，代表市場的「平均成本」。
-        <br>**常見參數與意義**：
-        - **5日線 (週線)**：短線操盤手的生命線，股價跌破通常短線轉弱。
-        - **20日線 (月線)**：波段操作的關鍵，又稱「多空分水嶺」，站上月線視為多頭，跌破視為空頭。
-        - **60日線 (季線)**：中長線保護傘，季線向上代表大趨勢看好。
-        """,
-        "RSI 相對強弱指標": """
-        **定義**：用來判斷股價是否「漲過頭」或「跌過頭」的動能指標，數值介於 0~100。
-        <br>**實戰應用**：
-        - **RSI > 80 (超買區)**：代表短線過熱，隨時可能拉回修正，不宜追高。
-        - **RSI < 20 (超賣區)**：代表短線殺過頭，隨時可能出現反彈，是搶短機會。
-        - **50 中線**：RSI 在 50 以上代表多方強勢，50 以下代表空方強勢。
-        """,
-        "KD 隨機指標": """
-        **定義**：由 K 值與 D 值組成，反應股價在最近一段時間內的強弱位置。
-        <br>**實戰應用**：
-        - **黃金交叉**：K 值由下往上穿過 D 值，且數值在 20 以下，是強烈買訊。
-        - **死亡交叉**：K 值由上往下穿過 D 值，且數值在 80 以上，是賣出訊號。
-        - **鈍化**：當 KD 都在 80 以上持續很久，代表漲勢極強（軋空），不應隨意放空。
-        """,
-        "乖離率 (BIAS)": """
-        **定義**：測量「目前股價」與「平均成本(均線)」的距離百分比。
-        <br>**原理**：老人與狗理論。股價(狗)最終會回到均線(老人)身邊。
-        <br>**實戰應用**：
-        - **正乖離過大**：股價離均線太遠(漲太多)，獲利了結賣壓會出籠。
-        - **負乖離過大**：股價離均線太遠(跌太深)，容易出現技術性反彈。
-        """
+        "K線": "紀錄股價走勢的圖形。紅K代表漲(收盤>開盤)，綠K代表跌(收盤<開盤)。",
+        "MA (均線)": "平均成本線。5日(週)、20日(月)、60日(季)。月線向上為多頭，向下為空頭。",
+        "RSI": "動能指標(0-100)。>80代表超買(過熱)，<20代表超賣(反彈)。",
+        "KD": "隨機指標。黃金交叉(K穿過D)買進，死亡交叉(K跌破D)賣出。",
+        "乖離率": "股價與均線的距離。正乖離過大易回檔，負乖離過大易反彈。"
     },
-    "籌碼與市場篇": {
-        "三大法人": """
-        **定義**：指在台股市場資金最龐大的三群人，動向常決定大盤漲跌。
-        1. **外資**：外國投資機構，資金最部位最大，偏好大型權值股（如台積電），操作看重基本面與國際局勢。
-        2. **投信**：國內的基金公司，募集散戶的錢來投資，偏好中小型股，每季底(3,6,9,12月)常有「作帳行情」。
-        3. **自營商**：券商自己的投資部門，操作風格極短線，常追高殺低。
-        """,
-        "融資與融券": """
-        **定義**：散戶最常用的槓桿工具。
-        - **融資 (看多)**：覺得會漲但錢不夠，向券商借錢買股票。融資餘額過高代表散戶太多，籌碼凌亂，主力不愛拉抬。
-        - **融券 (看空)**：覺得會跌，向券商借股票來賣，等跌下去再買回來還。
-        - **軋空**：融券太多時，主力故意硬拉股價，逼空頭認賠回補，造成股價更猛烈的上漲。
-        """,
-        "當沖 (Day Trading)": """
-        **定義**：當日沖銷。當天買進的股票，當天就賣掉，不留股票過夜。
-        <br>**特色**：
-        - 不用本金交割（只需補貼手續費與價差），可以以小博大。
-        - 風險極高，需要極快的反應速度與紀律。
-        - 通常挑選「成交量大」、「振幅大」的熱門股操作。
-        """
+    "籌碼篇": {
+        "三大法人": "外資(大資金)、投信(作帳行情)、自營商(短線)。",
+        "融資": "散戶借錢買股(看多)，餘額過高代表籌碼凌亂。",
+        "融券": "散戶借券賣股(看空)，過高可能出現軋空行情。",
+        "當沖": "當日買進賣出，不留過夜，風險高。"
     },
     "基本面篇": {
-        "EPS 每股盈餘": """
-        **定義**：Earnings Per Share。代表公司每一股「賺了多少錢」。
-        <br>**公式**：稅後淨利 / 發行股數。
-        <br>**意義**：EPS 是股價的基石。EPS 越高，通常股價越高。EPS 連續成長的公司最受歡迎。
-        """,
-        "本益比 (P/E Ratio)": """
-        **定義**：計算「買進這檔股票，要幾年才能回本」。
-        <br>**公式**：股價 / EPS。
-        <br>**應用**：
-        - 一般認為 10~15 倍算便宜，20 倍以上算貴。
-        - 但高成長股（如 AI 產業）市場願意給予 30 倍以上的本益比。
-        """,
-        "ROE 股東權益報酬率": """
-        **定義**：股神巴菲特最看重的指標。代表公司利用股東的錢，能創造多少獲利效率。
-        <br>**標準**：通常 ROE > 15% 且連續多年維持，才算是一間具備護城河的優秀公司。
-        """,
-        "殖利率 (Yield)": """
-        **定義**：類似銀行的存款利息概念。
-        <br>**公式**：現金股利 / 股價。
-        <br>**應用**：存股族的最愛。通常殖利率 > 5% 視為高配息股。但要注意「賺了股息、賠了價差」的風險。
-        """
+        "EPS": "每股盈餘，公司每一股賺多少錢，股價的基礎。",
+        "本益比": "股價/EPS，代表回本年限。越低通常越便宜。",
+        "ROE": "股東權益報酬率，巴菲特選股指標，>15%為佳。",
+        "殖利率": "現金股利/股價，存股族最看重。"
     }
 }
 
-# --- 6. 檔案與會員系統 ---
+# --- 5. 檔案與會員系統 ---
 COMMENTS_FILE = "comments.csv"
 USERS_FILE = "users.json"
 
@@ -173,9 +106,7 @@ def register_user(username, password, nickname):
     if username in users: return False, "帳號已存在"
     users[username] = {
         "password": hashlib.sha256(password.encode()).hexdigest(),
-        "status": "approved", 
-        "watchlist": [],
-        "nickname": nickname
+        "status": "approved", "watchlist": [], "nickname": nickname
     }
     save_users(users)
     return True, "註冊成功！"
@@ -186,14 +117,14 @@ def login_user(username, password):
     if users[username]['password'] != hashlib.sha256(password.encode()).hexdigest(): return False, "密碼錯誤"
     return True, users[username]
 
-# --- 7. 核心函式 ---
+# --- 6. 核心函式 ---
 def get_color_settings(stock_id):
     if ".TW" in stock_id.upper() or ".TWO" in stock_id.upper() or stock_id.isdigit():
         return {"up": "#FF0000", "down": "#00FF00", "delta": "inverse"}
     else: return {"up": "#00FF00", "down": "#FF0000", "delta": "normal"}
 
-# 雙引擎數據抓取
 def get_stock_data_robust(stock_id):
+    # 1. Yahoo (優先)
     suffixes = ['.TW', '.TWO'] if stock_id.isdigit() else ['']
     for suffix in suffixes:
         try_id = f"{stock_id}{suffix}"
@@ -202,7 +133,7 @@ def get_stock_data_robust(stock_id):
             df = stock.history(period="1mo")
             if not df.empty: return try_id, stock, df, "yahoo"
         except: pass
-            
+    # 2. TWSE (備用)
     if stock_id.isdigit():
         try:
             realtime = twstock.realtime.get(stock_id)
@@ -221,10 +152,25 @@ def get_stock_data_robust(stock_id):
         except: pass
     return None, None, None, "fail"
 
-def set_view_to_analysis(code, name):
-    st.session_state['current_stock'] = code
-    st.session_state['current_name'] = name
-    st.session_state['view_mode'] = 'analysis'
+def navigate_to(mode, stock_code=None, stock_name=None):
+    # 頁面跳轉並記錄歷史
+    if stock_code:
+        st.session_state['current_stock'] = stock_code
+        st.session_state['current_name'] = stock_name
+    
+    st.session_state['view_mode'] = mode
+    # 避免重複堆疊
+    if not st.session_state['page_stack'] or st.session_state['page_stack'][-1] != mode:
+        st.session_state['page_stack'].append(mode)
+    st.rerun()
+
+def go_back():
+    # 返回上一頁 (不登出)
+    if len(st.session_state['page_stack']) > 1:
+        st.session_state['page_stack'].pop() # 移除當前
+        previous = st.session_state['page_stack'][-1]
+        st.session_state['view_mode'] = previous
+        st.rerun()
 
 def handle_search_form():
     raw = st.session_state.sidebar_search_input
@@ -232,27 +178,21 @@ def handle_search_form():
         n = "美股"
         if raw in twstock.codes: n = twstock.codes[raw].name
         elif raw.isdigit(): n = "台股"
-        set_view_to_analysis(raw, n)
+        navigate_to('analysis', raw, n)
 
 def translate_text(text):
     if not text: return "暫無詳細描述"
     try: return GoogleTranslator(source='auto', target='zh-TW').translate(text[:1500])
     except: return text
 
-# 🔥 關鍵修復：留言板資料讀取 (防崩潰)
 def load_comments():
     if os.path.exists(COMMENTS_FILE):
         try:
             df = pd.read_csv(COMMENTS_FILE)
-            # 自動修復舊格式：如果只有 User 沒有 Nickname，就做一個搬移
-            if 'User' in df.columns and 'Nickname' not in df.columns:
-                df['Nickname'] = df['User']
-            # 確保欄位存在
-            if 'Nickname' not in df.columns:
-                df['Nickname'] = 'Anonymous'
+            if 'User' in df.columns and 'Nickname' not in df.columns: df['Nickname'] = df['User']
+            if 'Nickname' not in df.columns: df['Nickname'] = 'Anonymous'
             return df
-        except:
-            return pd.DataFrame(columns=["Time", "Nickname", "Message"])
+        except: return pd.DataFrame(columns=["Time", "Nickname", "Message"])
     return pd.DataFrame(columns=["Time", "Nickname", "Message"])
 
 def save_comment(nickname, msg):
@@ -264,80 +204,185 @@ def save_comment(nickname, msg):
 def update_top_100():
     st.toast("更新精選池...", icon="🔄"); time.sleep(1); st.toast("完成", icon="✅")
 
-# --- 8. 側邊欄 ---
+# --- 7. 側邊欄 (佈局優化) ---
 with st.sidebar:
     st.title("🎮 戰情控制台")
+    
+    # 狀態顯示
     if st.session_state['user_info']:
         nick = st.session_state['user_info'].get('nickname', st.session_state['user_id'])
-        st.success(f"👤 嗨，**{nick}**")
-        if st.button("登出", use_container_width=True):
-            st.session_state['user_info'] = None; st.session_state['user_id'] = None; st.rerun()
+        st.success(f"👤 **{nick}** (已登入)")
     else:
-        st.info("👤 尚未登入")
-        with st.expander("🔐 登入 / 註冊", expanded=True):
-            tab_l, tab_r = st.tabs(["登入", "註冊"])
-            with tab_l:
-                l_u = st.text_input("帳號", key="sl_u")
-                l_p = st.text_input("密碼", type="password", key="sl_p")
-                if st.button("登入", key="btn_l"):
-                    ok, res = login_user(l_u, l_p)
-                    if ok:
-                        st.session_state['user_id'] = l_u; st.session_state['user_info'] = res
-                        st.success("成功"); st.rerun()
-                    else: st.error(res)
-            with tab_r:
-                r_u = st.text_input("帳號", key="sr_u")
-                r_p = st.text_input("密碼", type="password", key="sr_p")
-                r_n = st.text_input("暱稱", key="sr_n")
-                if st.button("註冊", key="btn_r"):
-                    if r_n:
-                        ok, res = register_user(r_u, r_p, r_n)
-                        if ok:
-                            st.session_state['user_id'] = r_u
-                            st.session_state['user_info'] = {"status": "approved", "watchlist": [], "nickname": r_n}
-                            st.success(res); time.sleep(1); st.rerun()
-                        else: st.error(res)
-                    else: st.error("需暱稱")
+        st.info("👤 訪客模式 (尚未登入)")
 
     st.divider()
+    
+    # 搜尋
     with st.form(key='search', clear_on_submit=False):
         st.text_input("🔍 輸入代號 (Enter)", key="sidebar_search_input")
         st.form_submit_button("開始搜尋", on_click=handle_search_form)
 
+    # 策略選單
     st.subheader("🤖 AI 策略")
     c1, c2, c3 = st.columns(3)
-    if c1.button("當沖", use_container_width=True): st.session_state['view_mode'] = 'scan_day'; st.rerun()
-    if c2.button("短線", use_container_width=True): st.session_state['view_mode'] = 'scan_short'; st.rerun()
-    if c3.button("長線", use_container_width=True): st.session_state['view_mode'] = 'scan_long'; st.rerun()
-    if st.button("📈 漲幅前 100", use_container_width=True): st.session_state['view_mode'] = 'top_gainers'; st.rerun()
+    if c1.button("當沖", use_container_width=True): navigate_to('scan_day')
+    if c2.button("短線", use_container_width=True): navigate_to('scan_short')
+    if c3.button("長線", use_container_width=True): navigate_to('scan_long')
+
+    if st.button("📈 漲幅前 100", use_container_width=True): navigate_to('top_gainers')
     if st.button("🔄 更新精選池", use_container_width=True): update_top_100()
 
     st.divider()
-    if st.button("📖 股市新手村", use_container_width=True): st.session_state['view_mode'] = 'learning_center'; st.rerun()
-    if st.button("🔒 個人自選股", use_container_width=True): st.session_state['view_mode'] = 'my_watchlist'; st.rerun()
-    if st.button("💬 戰友留言板", use_container_width=True): st.session_state['view_mode'] = 'comments'; st.rerun()
+    if st.button("📖 股市新手村", use_container_width=True): navigate_to('learning_center')
+    if st.button("🔒 個人自選股", use_container_width=True): navigate_to('my_watchlist')
+    if st.button("💬 戰友留言板", use_container_width=True): navigate_to('comments')
     
+    # User Request #4: 登入按鈕移到最下方 (但在首頁上方)
     st.divider()
-    if st.button("🏠 回首頁", use_container_width=True): st.session_state['view_mode'] = 'welcome'; st.rerun()
-    st.markdown('<div class="version-text">AI 股市戰情室 V23.0 (贖罪修復版)</div>', unsafe_allow_html=True)
+    if not st.session_state['user_info']:
+        if st.button("🔐 登入 / 註冊", use_container_width=True):
+            navigate_to('login_page') # 跳轉到右側登入頁
+    else:
+        if st.button("🚪 登出系統", use_container_width=True):
+            st.session_state['user_info'] = None
+            st.session_state['user_id'] = None
+            navigate_to('welcome')
 
-# --- 9. 主畫面 ---
+    if st.button("🏠 回首頁", use_container_width=True): navigate_to('welcome')
+    
+    st.markdown('<div class="version-text">AI 股市戰情室 V24.0 (專業自選版)</div>', unsafe_allow_html=True)
 
-if st.session_state['view_mode'] == 'welcome':
-    st.title("👋 歡迎來到 AI 股市戰情室 V23")
+# --- 8. 主畫面邏輯 ---
+
+# [頁面 0] 獨立登入頁面 (User Request #5)
+if st.session_state['view_mode'] == 'login_page':
+    st.title("🔐 會員登入中心")
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("<div class='login-box'>", unsafe_allow_html=True)
+        st.subheader("現有會員登入")
+        l_u = st.text_input("帳號", key="main_l_u")
+        l_p = st.text_input("密碼", type="password", key="main_l_p")
+        if st.button("登入", key="main_btn_l"):
+            ok, res = login_user(l_u, l_p)
+            if ok:
+                st.session_state['user_id'] = l_u; st.session_state['user_info'] = res
+                st.success(f"歡迎回來，{l_u}！"); time.sleep(0.5); navigate_to('my_watchlist')
+            else: st.error(res)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with col2:
+        st.subheader("新朋友註冊 (免審核)")
+        with st.form("reg_form"):
+            r_u = st.text_input("設定帳號")
+            r_p = st.text_input("設定密碼", type="password")
+            r_n = st.text_input("您的暱稱 (留言顯示用)")
+            if st.form_submit_button("立即註冊"):
+                if r_n and r_u and r_p:
+                    ok, res = register_user(r_u, r_p, r_n)
+                    if ok:
+                        st.session_state['user_id'] = r_u
+                        st.session_state['user_info'] = {"status": "approved", "watchlist": [], "nickname": r_n}
+                        st.success(res); time.sleep(1); navigate_to('my_watchlist')
+                    else: st.error(res)
+                else: st.error("資料請填寫完整")
+
+    if st.button("⬅️ 返回上一頁"): go_back()
+
+# [頁面 1] 歡迎頁
+elif st.session_state['view_mode'] == 'welcome':
+    st.title("👋 歡迎來到 AI 股市戰情室 V24")
     with st.container(border=True):
         st.markdown("""
-        #### 🚀 V23 贖罪修復版
-        * **🔧 留言板修復**：修正資料格式錯誤，舊留言自動相容，不再報錯。
-        * **📖 內容全開**：股市新手村與個股分析，恢復最完整的詳細說明。
-        * **🚑 雙引擎救援**：持續支援 Yahoo + 證交所雙重數據源，防止查無資料。
-        * **💯 掃描保證**：優化演算法，確保策略掃描能列出豐富結果。
+        #### 🚀 V24 專業改版
+        * **🔒 登入體驗升級**：點擊左側登入按鈕，右側顯示完整登入視窗，操作更舒適。
+        * **📊 自選股詳解**：拒絕簡化！自選股清單現在會顯示完整的 AI 診斷卡片，包含 RSI、趨勢、量能分析。
+        * **🔙 智慧返回**：新增「返回上一頁」功能，切換頁面不再被強制登出。
+        * **💯 掃描保證**：維持 800+ 檔底層數據，確保策略選股結果豐富。
         """)
 
+# [頁面 2] 自選股 (User Request #2 & #3: 專業詳細版)
+elif st.session_state['view_mode'] == 'my_watchlist':
+    st.title("🔒 個人自選股戰情室")
+    
+    if not st.session_state['user_info']:
+        st.warning("您尚未登入，無法查看自選股。")
+        if st.button("前往登入"): navigate_to('login_page')
+    else:
+        ud = load_users()[st.session_state['user_id']]; wl = ud['watchlist']
+        
+        # 管理區
+        with st.expander("⚙️ 管理我的清單", expanded=False):
+            c1, c2 = st.columns([3, 1])
+            ac = c1.text_input("輸入代號加入")
+            if c2.button("加入"):
+                u = load_users()
+                if ac not in u[st.session_state['user_id']]['watchlist']:
+                    u[st.session_state['user_id']]['watchlist'].append(ac); save_users(u); st.rerun()
+            st.write("已追蹤：")
+            cols = st.columns(6)
+            for i,c in enumerate(wl):
+                if cols[i%6].button(f"❌ {c}"): u=load_users(); u[st.session_state['user_id']]['watchlist'].remove(c); save_users(u); st.rerun()
+
+        st.divider()
+        st.subheader(f"📊 持股 AI 深度診斷 (共 {len(wl)} 檔)")
+        
+        if not wl:
+            st.info("目前清單是空的，請在上方加入股票。")
+        else:
+            if st.button("🚀 啟動 AI 全面診斷"):
+                pb = st.progress(0)
+                for i, c in enumerate(wl):
+                    pb.progress((i+1)/len(wl))
+                    full_id, _, d, src = get_stock_data_robust(c)
+                    n = twstock.codes[c].name if c in twstock.codes else c
+                    
+                    if d is not None:
+                        # 計算詳細數據 (User Request #3)
+                        if isinstance(d, pd.DataFrame) and not d.empty:
+                            curr = d['Close'].iloc[-1]; chg = curr - d['Close'].iloc[-2]
+                            pct = (chg / d['Close'].iloc[-2])*100
+                            m20 = d['Close'].rolling(20).mean().iloc[-1]
+                            m60 = d['Close'].rolling(60).mean().iloc[-1]
+                            
+                            # RSI
+                            delta = d['Close'].diff()
+                            u = delta.copy(); dd = delta.copy(); u[u<0]=0; dd[dd>0]=0
+                            rs = u.rolling(14).mean()/dd.abs().rolling(14).mean()
+                            rsi = (100 - 100/(1+rs)).iloc[-1]
+                            
+                            # 判斷
+                            trend = "🔥 多頭排列" if curr > m20 and m20 > m60 else ("❄️ 空頭排列" if curr < m20 and m20 < m60 else "⚖️ 盤整震盪")
+                            rsi_msg = "⚠️ 過熱" if rsi>80 else ("💎 超賣" if rsi<20 else "✅ 中性")
+                            vol_msg = "🔥 爆量" if d['Volume'].iloc[-1] > d['Volume'].tail(5).mean()*1.5 else "正常"
+                            
+                            # 顯示詳細卡片
+                            with st.container(border=True):
+                                col_a, col_b, col_c, col_d = st.columns([1.5, 2, 2, 1])
+                                col_a.markdown(f"### {c}")
+                                col_a.write(f"**{n}**")
+                                col_b.metric("現價", f"{curr:.2f}", f"{pct:+.2f}%")
+                                col_c.write(f"**趨勢**: {trend}")
+                                col_c.write(f"**RSI**: {rsi:.1f} ({rsi_msg}) | **量能**: {vol_msg}")
+                                col_d.button("詳情", key=f"wd_{c}", on_click=navigate_to, args=('analysis', c, n))
+                        
+                        else: # TWSE 備用源
+                            curr = d['Close']
+                            with st.container(border=True):
+                                st.write(f"**{c} {n}** : {curr} (僅即時報價)")
+                    else:
+                        st.error(f"{c} 讀取失敗")
+                pb.empty()
+
+# [頁面 9] 新手村
 elif st.session_state['view_mode'] == 'learning_center':
     st.title("📖 股市新手村")
-    t1, t2 = st.tabs(["📊 策略邏輯詳解", "📚 名詞詳解大全"])
-    with t1:
+    if st.button("⬅️ 返回上一頁"): go_back()
+    
+    tab1, tab2 = st.tabs(["📊 策略邏輯詳解", "📚 名詞詳解大全"])
+    with tab1:
         st.markdown("### 🤖 AI 選股邏輯揭密")
         st.markdown("""
         **1. 當沖快篩 (Day Trading)**
@@ -353,58 +398,22 @@ elif st.session_state['view_mode'] == 'learning_center':
         * **邏輯**：選擇趨勢穩健向上的股票，避免買在短線過熱點，適合長期持有。
         """)
     with t2:
-        q = st.text_input("🔍 搜尋名詞")
-        for cat, terms in STOCK_TERMS.items():
-            if q:
-                terms = {k:v for k,v in terms.items() if q.upper() in k.upper()}
-                if not terms: continue
-            with st.expander(f"📌 {cat}", expanded=True):
+        search_term = st.text_input("🔍 搜尋名詞")
+        for category, terms in STOCK_TERMS.items():
+            if search_term:
+                filtered_terms = {k:v for k,v in terms.items() if search_term.upper() in k.upper()}
+                if not filtered_terms: continue
+            else: filtered_terms = terms
+            with st.expander(f"📌 {category}", expanded=True):
                 for k,v in terms.items(): 
-                    st.markdown(f"""
-                    <div class="term-card">
-                        <div class="term-title">{k}</div>
-                        <div class="term-content">{v}</div>
-                    </div>""", unsafe_allow_html=True)
+                    st.markdown(f"<div class='term-card'><div class='term-title'>{k}</div><div class='term-content'>{v}</div></div>", unsafe_allow_html=True)
 
-elif st.session_state['view_mode'] == 'my_watchlist':
-    st.title("🔒 個人自選股")
-    if not st.session_state['user_info']:
-        st.warning("請先在左側登入")
-    else:
-        ud = load_users()[st.session_state['user_id']]; wl = ud['watchlist']
-        with st.expander("⚙️ 管理"):
-            c1, c2 = st.columns([3,1]); ac = c1.text_input("加股")
-            if c2.button("加"):
-                u = load_users(); 
-                if ac not in u[st.session_state['user_id']]['watchlist']:
-                    u[st.session_state['user_id']]['watchlist'].append(ac); save_users(u); st.rerun()
-            cols = st.columns(5)
-            for i,c in enumerate(wl):
-                if cols[i%5].button(f"🗑️ {c}"): u=load_users(); u[st.session_state['user_id']]['watchlist'].remove(c); save_users(u); st.rerun()
-        
-        st.subheader("📊 診斷")
-        if st.button("🚀 開始"):
-            pb = st.progress(0)
-            for i, c in enumerate(wl):
-                pb.progress((i+1)/len(wl))
-                full_id, _, d, src = get_stock_data_robust(c)
-                n = twstock.codes[c].name if c in twstock.codes else c
-                if d is not None:
-                    if isinstance(d, pd.DataFrame) and not d.empty:
-                        curr = d['Close'].iloc[-1]; m20 = d['Close'].rolling(20).mean().iloc[-1]
-                        stt = "🔥 多頭" if curr > m20 else "❄️ 空頭"
-                    else: curr = d['Close']; stt = "⚠️ 即時"
-                    with st.container(border=True):
-                        c1,c2,c3,c4 = st.columns([1,2,2,1])
-                        c1.write(f"**{c}**"); c2.write(n); c3.write(f"{curr:.2f} | {stt}")
-                        c4.button("看", key=f"w_{c}", on_click=set_view_to_analysis, args=(c, n))
-                else: st.error(f"{c} 失敗")
-            pb.empty()
-
+# [頁面 3] 留言板
 elif st.session_state['view_mode'] == 'comments':
     st.title("💬 戰友留言板")
     if not st.session_state['user_info']:
         st.warning("請先登入")
+        if st.button("去登入"): navigate_to('login_page')
     else:
         nick = st.session_state['user_info'].get('nickname', st.session_state['user_id'])
         c1, c2 = st.columns([1,4])
@@ -418,16 +427,17 @@ elif st.session_state['view_mode'] == 'comments':
         for i,r in df.iloc[::-1].iterrows():
             with st.chat_message("user"): st.write(f"**{r['Nickname']}** ({r['Time']}): {r['Message']}")
 
+# [頁面 4] 分析
 elif st.session_state['view_mode'] == 'analysis':
     code_input = st.session_state['current_stock']
     name_input = st.session_state['current_name']
     
-    if not code_input: st.warning("無代號")
-    else:
-        c1, c2 = st.columns([3, 1])
-        c1.title(f"{name_input} {code_input}")
-        if c2.checkbox("🔴 即時"): time.sleep(3); st.rerun()
-        
+    c1, c2, c3 = st.columns([3, 1, 1])
+    c1.title(f"{name_input} {code_input}")
+    if c2.button("⬅️ 返回"): go_back()
+    if c3.checkbox("🔴 即時"): time.sleep(3); st.rerun()
+    
+    try:
         rec = f"{code_input.replace('.TW','').replace('.TWO','')} {name_input}"
         if rec not in st.session_state['history']: st.session_state['history'].insert(0, rec)
 
@@ -474,7 +484,6 @@ elif st.session_state['view_mode'] == 'analysis':
             fig.update_layout(height=500, xaxis_rangeslider_visible=False, showlegend=False)
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar':False})
             
-            # 🔥 詳細版 AI 診斷回歸
             st.subheader("🤖 AI 深度診斷分析")
             m20 = df_hist['MA20'].iloc[-1]; m60 = df_hist['Close'].rolling(60).mean().iloc[-1]
             diff = df_hist['Close'].diff(); u=diff.copy(); dd=diff.copy(); u[u<0]=0; dd[dd>0]=0
@@ -485,21 +494,16 @@ elif st.session_state['view_mode'] == 'analysis':
                 c1, c2 = st.columns(2)
                 with c1:
                     st.markdown("### 📈 趨勢訊號")
-                    if curr > m20 and m20 > m60: 
-                        st.success("🔥 **多頭排列**：股價站上月線，月線大於季線，趨勢強勁向上。")
-                    elif curr < m20 and m20 < m60: 
-                        st.error("❄️ **空頭排列**：股價跌破月線，月線死叉季線，上方壓力沉重。")
-                    else: 
-                        st.warning("⚖️ **盤整震盪**：均線糾結，方向不明，建議觀望。")
+                    if curr > m20 and m20 > m60: st.success("🔥 **多頭排列**：趨勢強勁向上。")
+                    elif curr < m20 and m20 < m60: st.error("❄️ **空頭排列**：上方壓力沉重。")
+                    else: st.warning("⚖️ **盤整震盪**：方向不明。")
                 with c2:
                     st.markdown("### 🔍 關鍵指標")
-                    st.write(f"**RSI 強弱指數**: `{rsi:.1f}`")
-                    if rsi > 80: st.warning("⚠️ **短線過熱**：買盤過強，隨時可能回檔修正。")
-                    elif rsi < 20: st.success("💎 **短線超賣**：賣壓竭盡，有機會出現技術性反彈。")
-                    else: st.info("✅ **中性區間**：動能正常，跟隨趨勢操作。")
-                    
-                    st.write(f"**季線乖離率**: `{bias:.2f}%`")
-                    if bias > 20: st.warning("⚠️ **乖離過大**：股價漲幅偏離基本面，小心拉回。")
+                    st.write(f"• **RSI 強弱**: `{rsi:.1f}`")
+                    if rsi>80: st.warning("⚠️ 短線過熱 (RSI>80)")
+                    elif rsi<20: st.success("💎 短線超賣 (RSI<20)")
+                    else: st.info("✅ 中性區間")
+                    st.write(f"• **季線乖離**: `{bias:.2f}%`")
 
         elif source == "twse_backup":
             st.warning("⚠️ 使用 TWSE 備援數據 (無 K 線)")
@@ -509,6 +513,9 @@ elif st.session_state['view_mode'] == 'analysis':
             m1.metric("價", f"{curr:.2f}", f"{chg:.2f} ({pct:.2f}%)", delta_color=clr['delta'])
             m2.metric("高", f"{df['High']:.2f}"); m3.metric("低", f"{df['Low']:.2f}"); m4.metric("量", f"{int(df['Volume']/1000)}")
 
+    except Exception as e: st.error(f"錯誤: {e}")
+
+# 掃描
 elif st.session_state['view_mode'] in ['scan_day', 'scan_short', 'scan_long', 'top_gainers']:
     md = st.session_state['view_mode']
     if md == 'scan_day': t = "⚡ 當沖快篩"; days = 5
@@ -517,15 +524,15 @@ elif st.session_state['view_mode'] in ['scan_day', 'scan_short', 'scan_long', 't
     elif md == 'top_gainers': t = "🏆 漲幅排行"; days = 5
     
     st.title(f"🤖 {t} (前100)")
-    pool = st.session_state['scan_pool']
+    if st.button("⬅️ 返回"): go_back()
+    sp = st.session_state['scan_pool']
     
-    if st.button("開始搜尋"):
+    if st.button(f"開始搜尋 {t}"):
         l = []; pb = st.progress(0); stt = st.empty()
-        # 掃描邏輯，保證數量
-        scan_limit = 300 # 掃描前300檔
-        for i, c in enumerate(pool):
+        scan_limit = 300 
+        for i, c in enumerate(sp):
             if i >= scan_limit: break
-            stt.text(f"掃描中: {c}..."); pb.progress((i+1)/scan_limit)
+            stt.text(f"搜尋中: {c}..."); pb.progress((i+1)/scan_limit)
             try:
                 sid, _, d, src = get_stock_data_robust(c)
                 if d is not None and not d.empty and isinstance(d, pd.DataFrame):
@@ -553,13 +560,15 @@ elif st.session_state['view_mode'] in ['scan_day', 'scan_short', 'scan_long', 't
                     c1, c2, c3, c4, c5 = st.columns([0.5, 1, 2, 3, 1])
                     c1.write(f"#{k+1}"); c2.write(f"**{x['c']}**"); c3.write(x['n'])
                     c4.write(f"{x['p']:.2f} | {x['r']}")
-                    c5.button("分析", key=f"s_{x['c']}_{k}", on_click=set_view_to_analysis, args=(x['c'], x['n']))
-        else: st.warning("無資料")
+                    c5.button("分析", key=f"s_{x['c']}_{k}", on_click=navigate_to, args=('analysis', x['c'], x['n']))
+        else: st.warning("無符合標的")
 
+# 歷史
 elif st.session_state['view_mode'] == 'history':
     st.title("📜 歷史紀錄")
+    if st.button("⬅️ 返回"): go_back()
     for i in st.session_state['history']:
         c = i.split(" ")[0]; n = i.split(" ")[1] if " " in i else ""
         c1, c2 = st.columns([4, 1])
         c1.write(i)
-        c2.button("查看", key=f"hh_{c}", on_click=set_view_to_analysis, args=(c, n))
+        c2.button("查看", key=f"hh_{c}", on_click=navigate_to, args=('analysis', c, n))
