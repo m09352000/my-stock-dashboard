@@ -1,4 +1,4 @@
-# knowledge.py - 股市新手村 (美化排版版)
+# knowledge.py - 股市新手村 (修復排版)
 
 STOCK_TERMS = {
     "📊 技術指標篇": {
