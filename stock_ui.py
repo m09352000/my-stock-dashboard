@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 
-# --- CSS 樣式優化 (保持緊湊但資訊不減) ---
+# --- CSS 樣式優化 ---
 def inject_custom_css():
     st.markdown("""
         <style>
@@ -26,7 +26,7 @@ def render_header(title, show_monitor=False):
     c1.title(title)
     is_live = False
     if show_monitor:
-        st.caption("數據來源: Yahoo Finance / TWSE | V56 完整資訊版")
+        st.caption("數據來源: Yahoo Finance / TWSE | V57 詳細資訊回歸版")
         is_live = c2.toggle("🔴 啟動即時盤面", value=False)
     st.divider()
     return is_live
@@ -50,7 +50,7 @@ def render_company_profile(summary):
         with st.expander("🏢 公司簡介與業務", expanded=False):
             st.write(summary)
 
-# --- 5. 數據儀表板 (恢復雙排詳細資訊) ---
+# --- 5. 數據儀表板 (🔥 V57: 強制補回第二排詳細數據) ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              color_settings):
@@ -63,17 +63,16 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         m4.metric("振幅", f"{amp:.2f}%")
         m5.metric("主力動向", main_force)
         
-        # 第二排：量能核心 (補回詳細數字)
+        # 第二排：量能核心 (這裡之前被刪掉了，現在補回來)
         v1, v2, v3, v4, v5 = st.columns(5)
         v1.metric("今日總量", f"{int(vol/1000):,} 張")
-        # 顯示與昨日差額
         diff_vol = int((vol - vol_yest)/1000)
         v2.metric("昨日總量", f"{int(vol_yest/1000):,} 張", f"{diff_vol} 張")
         v3.metric("5日均量", f"{int(vol_avg/1000):,} 張")
         v4.metric("量能狀態", vol_status)
         v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 詳細診斷卡 (列表用 - 瘦身版) ---
+# --- 6. 詳細診斷卡 (列表用) ---
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None, strategy_info=None):
     chg_color = "black"
     advice_txt = "數據不足"
@@ -93,7 +92,6 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
             if len(df) > 20:
                 m5 = df['Close'].rolling(5).mean().iloc[-1]
                 m20 = df['Close'].rolling(20).mean().iloc[-1]
-                
                 if curr > m5 and m5 > m20: 
                     advice_txt = "🔥 多頭強勢"; advice_color = "red"
                 elif curr < m5 and curr > m20:
@@ -105,7 +103,6 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
         except: pass
     
     rank_tag = f"#{rank} " if rank else ""
-    
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns([1.5, 1.5, 3.5, 1])
         with c1:
@@ -146,7 +143,7 @@ def render_chart(df, title, color_settings):
     fig.update_layout(height=500, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 8. AI 報告 (🔥 V56: 詳細版 + 關鍵價位) ---
+# --- 8. AI 報告 (🔥 V57: 重新寫入分頁邏輯，確保它存在) ---
 def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low):
     st.subheader("🤖 AI 戰略分析報告")
     
@@ -155,7 +152,7 @@ def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low):
     r1 = 2 * pivot - low
     s1 = 2 * pivot - high
     
-    # 使用 Tabs 分開 "詳細診斷" 與 "關鍵價位"
+    # 🔥 這裡必須使用 st.tabs，您之前的版本可能這裡被簡化掉了
     t1, t2 = st.tabs(["📊 詳細趨勢診斷", "🎯 關鍵價位試算"])
     
     with t1:
@@ -182,8 +179,9 @@ def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low):
             else: st.write("✅ **乖離正常**：沿趨勢線運行。")
 
     with t2:
-        st.markdown("Based on Pivot Point Calculation (僅供參考)")
+        st.markdown("#### 🎯 Pivot Point 關鍵價位 (當沖/隔日沖參考)")
+        st.info("計算基礎：(最高+最低+收盤)/3")
         cp1, cp2, cp3 = st.columns(3)
-        cp1.metric("壓力位 (R1)", f"{r1:.2f}", help="預估上方第一道壓力")
-        cp2.metric("中軸 (Pivot)", f"{pivot:.2f}", help="多空分水嶺")
-        cp3.metric("支撐位 (S1)", f"{s1:.2f}", help="預估下方第一道支撐")
+        cp1.metric("壓力位 (R1)", f"{r1:.2f}", help="預估上方第一道壓力，突破代表極強")
+        cp2.metric("中軸 (Pivot)", f"{pivot:.2f}", help="多空分水嶺，站上偏多，跌破偏空")
+        cp3.metric("支撐位 (S1)", f"{s1:.2f}", help="預估下方第一道支撐，跌破代表極弱")
