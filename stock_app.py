@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 
 # --- 1. 網頁設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V13", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="AI 股市戰情室", layout="wide", initial_sidebar_state="auto")
 
 # --- 2. CSS 優化 (手機版 + 版本號位置) ---
 st.markdown("""
@@ -362,3 +362,4 @@ elif st.session_state['view_mode'] == 'history':
             c1, c2 = st.columns([4, 1])
             c1.write(f"{item}")
             c2.button("查看", key=f"h_{code}", on_click=set_view_to_analysis, args=(code, name))
+
