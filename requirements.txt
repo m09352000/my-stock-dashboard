@@ -6,3 +6,5 @@ plotly
 deep-translator
 lxml
 ta
+pytesseract
+Pillow
