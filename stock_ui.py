@@ -2,7 +2,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# --- 1. 頁面標題與監控按鈕 ---
+# --- 1. 標題 ---
 def render_header(title, show_monitor=False):
     c1, c2 = st.columns([3, 1])
     c1.title(title)
@@ -12,23 +12,23 @@ def render_header(title, show_monitor=False):
     st.divider()
     return is_live
 
-# --- 2. 底部返回按鈕 ---
+# --- 2. 返回 ---
 def render_back_button(callback_func):
     st.divider()
     if st.button("⬅️ 返回上一頁", use_container_width=True):
         callback_func()
 
-# --- 3. 新手村卡片 ---
+# --- 3. 新手村卡片 (修復版) ---
 def render_term_card(title, content):
     st.info(f"### {title}\n\n{content}")
 
 # --- 4. 公司簡介 ---
 def render_company_profile(summary):
     if summary and summary != "暫無詳細描述":
-        with st.expander("🏢 公司簡介 (點擊展開)", expanded=False):
+        with st.expander("🏢 公司簡介", expanded=False):
             st.write(summary)
 
-# --- 5. 詳細數據儀表板 ---
+# --- 5. 數據儀表板 ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              color_settings):
@@ -45,46 +45,35 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     v4.metric("量能狀態", vol_status)
     v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 自選股/掃描 詳細診斷卡 (🔥 V42: 新增 strategy_info 顯示關鍵數據) ---
+# --- 6. 詳細診斷卡 (🔥 V42: 支援策略資訊顯示) ---
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None, strategy_info=None):
-    # 預設狀態
+    # 預設
     status_color = "gray"
-    trend_txt = "分析中..."
+    trend_txt = "分析中"
     
-    # 處理排名顯示
+    # 排名文字
     display_name = f"#{rank} {name}" if rank else name
     
-    # 邏輯判斷
+    # 邏輯
     if df is not None and not df.empty:
         try:
-            if source_type == "yahoo":
-                curr = df['Close'].iloc[-1]
-                
-                # 計算均線趨勢
-                if len(df) > 20:
-                    m20 = df['Close'].rolling(20).mean().iloc[-1]
-                    m60 = df['Close'].rolling(60).mean().iloc[-1]
-                    if curr > m20 and m20 > m60: 
-                        trend_txt = "🔥 多頭排列"; status_color = "green"
-                    elif curr < m20 and m20 < m60: 
-                        trend_txt = "❄️ 空頭修正"; status_color = "red"
-                    elif curr > m20:
-                        trend_txt = "📈 短多強勢"; status_color = "orange"
-                    else:
-                        trend_txt = "⚖️ 盤整震盪"
-            else:
-                trend_txt = "即時報價"
-                status_color = "blue"
+            curr = df['Close'].iloc[-1]
+            if len(df) > 20:
+                m20 = df['Close'].rolling(20).mean().iloc[-1]
+                if curr > m20: 
+                    trend_txt = "🔥 多頭"; status_color = "green"
+                else: 
+                    trend_txt = "❄️ 空頭"; status_color = "red"
         except: pass
 
-    # 繪製卡片
+    # 繪製
     with st.container(border=True):
         c1, c2, c3, c4, c5 = st.columns([1, 1.5, 2, 2.5, 1])
         c1.markdown(f"### {code}")
         c2.markdown(f"**{display_name}**")
         c3.metric("現價", f"{price:.2f}")
         
-        # 這裡顯示策略專屬資訊 (例如: 漲幅 +5%)
+        # 顯示策略關鍵數據 (如: 成交量、漲幅)
         if strategy_info:
             c4.markdown(f"**{strategy_info}**")
         else:
@@ -111,9 +100,8 @@ def render_ai_report(curr, m20, m60, rsi, bias):
     c1, c2, c3 = st.columns(3)
     with c1:
         st.info("📈 **趨勢研判**")
-        if curr > m20 and m20 > m60: st.markdown("### 🔥 強勢多頭"); st.write("站穩月線，均線發散向上。")
-        elif curr < m20 and m20 < m60: st.markdown("### ❄️ 空頭修正"); st.write("跌破月線，上方壓力重。")
-        else: st.markdown("### ⚖️ 盤整震盪"); st.write("均線糾結，方向不明。")
+        if curr > m20: st.markdown("### 🔥 強勢多頭"); st.write("股價站穩月線之上。")
+        else: st.markdown("### ❄️ 弱勢整理"); st.write("股價跌破月線。")
     with c2:
         st.warning("⚡ **動能 (RSI)**")
         st.metric("數值", f"{rsi:.1f}")
