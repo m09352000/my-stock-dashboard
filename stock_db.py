@@ -7,13 +7,13 @@ import hashlib
 from datetime import datetime
 from deep_translator import GoogleTranslator
 
-# --- 檔案路徑設定 ---
+# --- 檔案路徑 ---
 DB_USERS = "db_users.json"
 DB_WATCHLISTS = "db_watchlists.json"
 DB_HISTORY = "db_history.json"
 DB_COMMENTS = "db_comments.csv"
 
-# 策略專屬存檔路徑
+# 掃描存檔
 SCAN_FILES = {
     'day': 'db_scan_day.json',
     'short': 'db_scan_short.json',
@@ -21,26 +21,25 @@ SCAN_FILES = {
     'top': 'db_scan_top.json'
 }
 
-# --- 資料讀寫基礎 ---
+# --- JSON 基礎 ---
 def load_json(path, default):
     if not os.path.exists(path):
-        with open(path, 'w') as f: json.dump(default, f)
+        with open(path, 'w', encoding='utf-8') as f: json.dump(default, f, ensure_ascii=False)
         return default
     try:
-        with open(path, 'r') as f: return json.load(f)
+        with open(path, 'r', encoding='utf-8') as f: return json.load(f)
     except: return default
 
 def save_json(path, data):
-    with open(path, 'w') as f: json.dump(data, f)
+    with open(path, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=2)
 
-# --- 策略結果存取 (V43) ---
+# --- 掃描結果 (修正為 100 檔) ---
 def save_scan_results(mode, results):
-    """儲存掃描結果代號清單"""
     if mode in SCAN_FILES:
-        save_json(SCAN_FILES[mode], results)
+        # 確保只存前 100
+        save_json(SCAN_FILES[mode], results[:100])
 
 def load_scan_results(mode):
-    """讀取掃描結果代號清單"""
     if mode in SCAN_FILES:
         return load_json(SCAN_FILES[mode], [])
     return []
@@ -53,9 +52,14 @@ def login_user(username, password):
     return True, users[username]
 
 def register_user(u, p, n):
+    if not u or not p: return False, "帳號密碼不得為空"
     users = load_json(DB_USERS, {})
     if u in users: return False, "帳號已存在"
-    users[u] = {"password": hashlib.sha256(p.encode()).hexdigest(), "nickname": n}
+    # 這裡確保暱稱被寫入
+    users[u] = {
+        "password": hashlib.sha256(p.encode()).hexdigest(), 
+        "nickname": n if n else u
+    }
     save_json(DB_USERS, users)
     init_user_data(u)
     return True, "註冊成功"
@@ -89,9 +93,14 @@ def add_history(user, record):
 
 def get_history(user): return load_json(DB_HISTORY, {}).get(user, [])
 
-def save_comment(nick, msg):
+def save_comment(user_id, msg):
+    # 抓取使用者暱稱
+    users = load_json(DB_USERS, {})
+    nick = users.get(user_id, {}).get('nickname', user_id)
+    
     df = pd.read_csv(DB_COMMENTS) if os.path.exists(DB_COMMENTS) else pd.DataFrame(columns=["Time", "Nickname", "Message"])
     new = pd.DataFrame([[datetime.now().strftime("%m/%d %H:%M"), nick, msg]], columns=["Time", "Nickname", "Message"])
+    # 存檔時包含 header
     pd.concat([new, df], ignore_index=True).to_csv(DB_COMMENTS, index=False)
 
 def get_comments():
@@ -100,21 +109,24 @@ def get_comments():
         except: pass
     return pd.DataFrame(columns=["Time", "Nickname", "Message"])
 
-# --- 工具函式 ---
+# --- 工具 ---
 def get_color_settings(stock_id):
+    # 台股：紅漲綠跌
     if ".TW" in stock_id.upper() or ".TWO" in stock_id.upper() or stock_id.isdigit():
         return {"up": "#FF0000", "down": "#00FF00", "delta": "inverse"}
+    # 美股：綠漲紅跌
     return {"up": "#00FF00", "down": "#FF0000", "delta": "normal"}
 
 def translate_text(text):
     if not text: return "暫無詳細描述"
-    try: return GoogleTranslator(source='auto', target='zh-TW').translate(text[:1500])
+    try: return GoogleTranslator(source='auto', target='zh-TW').translate(text[:1000])
     except: return text
 
 def update_top_100():
+    # 預留給未來擴充自動更新功能
     return True
 
-# --- 雙引擎股票抓取 ---
+# --- 股票數據 (Yahoo + Twstock) ---
 def get_stock_data(code):
     # 1. Yahoo (優先)
     suffixes = ['.TW', '.TWO'] if code.isdigit() else ['']
