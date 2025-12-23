@@ -7,21 +7,21 @@ import hashlib
 from datetime import datetime
 from deep_translator import GoogleTranslator
 
-# --- 📂 檔案路徑設定 (V41 新增獨立資料庫) ---
+# 檔案路徑設定
 DB_USERS = "db_users.json"
 DB_WATCHLISTS = "db_watchlists.json"
 DB_HISTORY = "db_history.json"
 DB_COMMENTS = "db_comments.csv"
 
-# 策略專屬資料庫路徑
+# 策略專屬存檔 (V42 新增)
 SCAN_FILES = {
-    'day': 'db_scan_day.json',     # 當沖存這裡
-    'short': 'db_scan_short.json', # 短線存這裡
-    'long': 'db_scan_long.json',   # 長線存這裡
-    'top': 'db_scan_top.json'      # 漲幅存這裡
+    'day': 'db_scan_day.json',
+    'short': 'db_scan_short.json',
+    'long': 'db_scan_long.json',
+    'top': 'db_scan_top.json'
 }
 
-# --- 資料讀寫基礎函式 ---
+# --- 資料讀寫 ---
 def load_json(path, default):
     if not os.path.exists(path):
         with open(path, 'w') as f: json.dump(default, f)
@@ -33,19 +33,16 @@ def load_json(path, default):
 def save_json(path, data):
     with open(path, 'w') as f: json.dump(data, f)
 
-# --- 🔥 V41 新增：策略結果存取功能 ---
-def save_scan_results(mode, codes_list):
-    """將掃描到的股票代號清單，存入對應的檔案"""
+# --- 策略存取 (V42) ---
+def save_scan_results(mode, results):
+    """儲存掃描結果 (包含排名資訊)"""
     if mode in SCAN_FILES:
-        filename = SCAN_FILES[mode]
-        # 我們只存代號，保持檔案輕量，下次讀取時再抓最新股價
-        save_json(filename, codes_list)
+        save_json(SCAN_FILES[mode], results)
 
 def load_scan_results(mode):
-    """讀取特定策略上次的掃描結果"""
+    """讀取上次掃描結果"""
     if mode in SCAN_FILES:
-        filename = SCAN_FILES[mode]
-        return load_json(filename, [])
+        return load_json(SCAN_FILES[mode], [])
     return []
 
 # --- 會員系統 ---
@@ -103,11 +100,11 @@ def get_comments():
         except: pass
     return pd.DataFrame(columns=["Time", "Nickname", "Message"])
 
-# --- 股票工具 ---
+# --- 股票工具 (🔥 補回這些函式，解決 AttributeError) ---
 def get_color_settings(stock_id):
     if ".TW" in stock_id.upper() or ".TWO" in stock_id.upper() or stock_id.isdigit():
         return {"up": "#FF0000", "down": "#00FF00", "delta": "inverse"}
-    else: return {"up": "#00FF00", "down": "#FF0000", "delta": "normal"}
+    return {"up": "#00FF00", "down": "#FF0000", "delta": "normal"}
 
 def translate_text(text):
     if not text: return "暫無詳細描述"
@@ -117,7 +114,7 @@ def translate_text(text):
 def update_top_100():
     return True
 
-# --- 雙引擎股票抓取 ---
+# --- 核心：只用 Yahoo (最穩定) ---
 def get_stock_data(code):
     suffixes = ['.TW', '.TWO'] if code.isdigit() else ['']
     for s in suffixes:
