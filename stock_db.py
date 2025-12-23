@@ -7,13 +7,13 @@ import hashlib
 from datetime import datetime
 from deep_translator import GoogleTranslator
 
-# 檔案路徑設定
+# 檔案路徑
 DB_USERS = "db_users.json"
 DB_WATCHLISTS = "db_watchlists.json"
 DB_HISTORY = "db_history.json"
 DB_COMMENTS = "db_comments.csv"
 
-# --- 資料讀寫基礎函式 ---
+# --- 資料讀寫 ---
 def load_json(path, default):
     if not os.path.exists(path):
         with open(path, 'w') as f: json.dump(default, f)
@@ -46,7 +46,7 @@ def init_user_data(u):
     h = load_json(DB_HISTORY, {})
     if u not in h: h[u] = []; save_json(DB_HISTORY, h)
 
-# --- 自選股系統 ---
+# --- 自選股 ---
 def get_watchlist(user):
     db = load_json(DB_WATCHLISTS, {})
     return db.get(user, [])
@@ -77,13 +77,11 @@ def save_comment(nick, msg):
 def get_comments():
     if os.path.exists(DB_COMMENTS):
         try:
-            df = pd.read_csv(DB_COMMENTS)
-            if 'Nickname' not in df.columns: df['Nickname'] = 'Anonymous'
-            return df
+            return pd.read_csv(DB_COMMENTS)
         except: pass
     return pd.DataFrame(columns=["Time", "Nickname", "Message"])
 
-# --- 股票工具函式 (補回這些功能!) ---
+# --- 股票工具 ---
 def get_color_settings(stock_id):
     if ".TW" in stock_id.upper() or ".TWO" in stock_id.upper() or stock_id.isdigit():
         return {"up": "#FF0000", "down": "#00FF00", "delta": "inverse"}
@@ -94,21 +92,22 @@ def translate_text(text):
     try: return GoogleTranslator(source='auto', target='zh-TW').translate(text[:1500])
     except: return text
 
-# 🔥 補上這個被遺漏的更新函式
 def update_top_100():
+    # 這裡主要是觸發 UI 提示，實際資料更新依賴 get_stock_data
     return True
 
 # --- 雙引擎股票抓取 ---
 def get_stock_data(code):
-    # 1. Yahoo
+    # 1. Yahoo (優先嘗試)
     suffixes = ['.TW', '.TWO'] if code.isdigit() else ['']
     for s in suffixes:
         try:
             stock = yf.Ticker(f"{code}{s}")
-            df = stock.history(period="3mo") # 抓3個月才有足夠均線
+            df = stock.history(period="3mo")
             if not df.empty: return f"{code}{s}", stock, df, "yahoo"
         except: pass
-    # 2. Twstock
+    
+    # 2. Twstock (備用)
     if code.isdigit():
         try:
             rt = twstock.realtime.get(code)
