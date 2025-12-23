@@ -1,6 +1,5 @@
 import pandas as pd
 import yfinance as yf
-import twstock
 import json
 import os
 import hashlib
@@ -76,16 +75,16 @@ def save_comment(nick, msg):
 
 def get_comments():
     if os.path.exists(DB_COMMENTS):
-        try:
-            return pd.read_csv(DB_COMMENTS)
+        try: return pd.read_csv(DB_COMMENTS)
         except: pass
     return pd.DataFrame(columns=["Time", "Nickname", "Message"])
 
 # --- 股票工具 ---
 def get_color_settings(stock_id):
+    # 台股邏輯：紅漲綠跌
     if ".TW" in stock_id.upper() or ".TWO" in stock_id.upper() or stock_id.isdigit():
         return {"up": "#FF0000", "down": "#00FF00", "delta": "inverse"}
-    else: return {"up": "#00FF00", "down": "#FF0000", "delta": "normal"}
+    return {"up": "#00FF00", "down": "#FF0000", "delta": "normal"}
 
 def translate_text(text):
     if not text: return "暫無詳細描述"
@@ -93,30 +92,24 @@ def translate_text(text):
     except: return text
 
 def update_top_100():
+    # 這裡僅回傳 True，實際刷新由 app 端重跑
     return True
 
-# --- 雙引擎股票抓取 (V36 強健版) ---
+# --- 🔥 單引擎股票抓取 (純 Yahoo) ---
 def get_stock_data(code):
-    # 1. Yahoo (優先)
+    # 自動嘗試加上後綴
     suffixes = ['.TW', '.TWO'] if code.isdigit() else ['']
+    
     for s in suffixes:
         try:
-            stock = yf.Ticker(f"{code}{s}")
+            full_code = f"{code}{s}"
+            stock = yf.Ticker(full_code)
+            # 抓取 3 個月資料，確保有足夠 K 線
             df = stock.history(period="3mo")
-            if not df.empty: return f"{code}{s}", stock, df, "yahoo"
-        except: pass
-    
-    # 2. Twstock (備用) - 增加容錯
-    if code.isdigit():
-        try:
-            rt = twstock.realtime.get(code)
-            if rt['success'] and rt['realtime']['latest_trade_price'] != '-':
-                info = rt['realtime']
-                return f"{code} (TWSE)", None, {
-                    'Close': float(info['latest_trade_price']),
-                    'High': float(info['high']),
-                    'Low': float(info['low']),
-                    'Volume': int(info['accumulate_trade_volume'])*1000 if info['accumulate_trade_volume'] else 0
-                }, "twse"
-        except: pass
+            
+            if not df.empty:
+                return full_code, stock, df, "yahoo"
+        except:
+            continue
+            
     return None, None, None, "fail"
