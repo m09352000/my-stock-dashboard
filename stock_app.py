@@ -12,7 +12,7 @@ except:
     STOCK_TERMS = {}; STRATEGY_DESC = "系統模組載入中..."
 
 # --- 設定 (必須第一行) ---
-st.set_page_config(page_title="AI 股市戰情室 V46", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V47", layout="wide")
 
 # --- 初始化 State ---
 defaults = {
@@ -21,9 +21,9 @@ defaults = {
     'page_stack': ['welcome'],
     'current_stock': "",
     'current_name': "",
-    'scan_pool': [],          # 原始池
-    'filtered_pool': [],      # 過濾後的池 (給掃描用)
-    'scan_target_group': "全部", # 目前選擇的類股
+    'scan_pool': [],          
+    'filtered_pool': [],      
+    'scan_target_group': "全部", 
     'watch_active': False,
     'scan_results': []
 }
@@ -37,9 +37,8 @@ if not st.session_state['scan_pool']:
     try:
         # 抓取所有股票代號物件
         all_codes = [c for c in twstock.codes.values() if c.type == "股票"]
-        # 建立代號清單
         st.session_state['scan_pool'] = sorted([c.code for c in all_codes])
-        # 建立類股清單 (抓取 group 屬性並去重複)
+        # 建立類股清單
         groups = sorted(list(set(c.group for c in all_codes if c.group)))
         st.session_state['all_groups'] = ["🔍 全部上市櫃"] + groups
     except:
@@ -85,7 +84,7 @@ def handle_search():
             st.session_state.search_input_val = ""
         else: st.toast(f"找不到 '{raw}'", icon="⚠️")
 
-# --- Sidebar (V46 改版：類股選擇器) ---
+# --- Sidebar ---
 with st.sidebar:
     st.title("🎮 戰情控制台")
     uid = st.session_state['user_id']
@@ -97,27 +96,23 @@ with st.sidebar:
     # 1. 搜尋
     st.text_input("🔍 搜尋 (代號/名稱)", key="search_input_val", on_change=handle_search)
 
-    # 2. 策略掃描 (改為選單式)
+    # 2. 策略掃描 (含類股選擇)
     st.markdown("### 🤖 類股 AI 掃描")
     
     with st.container(border=True):
-        # A. 選擇類股 (捲軸式)
         sel_group = st.selectbox(
             "1️⃣ 選擇掃描範圍", 
             st.session_state.get('all_groups', ["全部"]),
             index=0
         )
         
-        # B. 選擇策略
         strat_map = {"⚡ 當沖快篩": "day", "📈 短線波段": "short", "🐢 長線存股": "long", "🏆 強勢前100": "top"}
         sel_strat_name = st.selectbox("2️⃣ 選擇 AI 策略", list(strat_map.keys()))
         
-        # C. 執行按鈕
-        if st.button("🚀 啟動掃描", use_container_width=True):
-            # 設定參數並跳轉
+        if st.button("🚀 啟動排序掃描", use_container_width=True):
             st.session_state['scan_target_group'] = sel_group
-            st.session_state['current_stock'] = strat_map[sel_strat_name] # 借用 current_stock 存策略代號
-            st.session_state['scan_results'] = [] # 清空舊結果
+            st.session_state['current_stock'] = strat_map[sel_strat_name]
+            st.session_state['scan_results'] = [] 
             nav_to('scan', strat_map[sel_strat_name])
             st.rerun()
 
@@ -145,7 +140,7 @@ with st.sidebar:
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
 
     st.markdown("---")
-    st.caption("Ver: 46.0 (類股掃描版)")
+    st.caption("Ver: 47.0 (排名排序版)")
 
 # --- 主畫面路由 ---
 mode = st.session_state['view_mode']
@@ -153,10 +148,12 @@ mode = st.session_state['view_mode']
 if mode == 'welcome':
     ui.render_header("👋 歡迎來到 AI 股市戰情室")
     st.markdown("""
-    ### 🚀 V46 更新：類股精準掃描
-    * **🎯 指定類股**：現在您可以選擇 **「半導體」**、**「航運」** 或 **「生技」** 等特定族群。
-    * **🤖 策略疊加**：選定族群後，再套用 **「當沖」** 或 **「波段」** 策略，找出該族群的領頭羊。
-    * **⚡ 效率提升**：縮小範圍掃描速度更快！
+    ### 🚀 V47 更新：AI 智慧排序
+    * **🥇 強度排名**：掃描結果不再隨機排列！系統會根據您選擇的策略，將 **「最符合條件」** 的股票排在第一位。
+        * **當沖** ⮕ 依照 **成交量** 排序 (找熱門)
+        * **短線** ⮕ 依照 **動能乖離** 排序 (找強勢)
+        * **長線** ⮕ 依照 **趨勢穩定度** 排序 (找穩健)
+    * **🎯 類股聚焦**：配合類股篩選，快速找出該族群的領頭羊。
     """)
 
 elif mode == 'login':
@@ -267,42 +264,40 @@ elif mode == 'chat':
     for i, r in df.iloc[::-1].head(20).iterrows(): st.info(f"**{r['Nickname']}** ({r['Time']}):\n{r['Message']}")
     ui.render_back_button(go_back)
 
-# --- 掃描功能 (V46 大更新) ---
+# --- 掃描功能 (V47 智慧排序版) ---
 elif mode == 'scan': 
-    stype = st.session_state['current_stock'] # 這裡存的是策略代號 (day, short...)
+    stype = st.session_state['current_stock'] 
     target_group = st.session_state.get('scan_target_group', '全部上市櫃')
     title_map = {'day': '當沖快篩', 'short': '短線波段', 'long': '長線存股', 'top': '強勢前 100'}
     
     ui.render_header(f"🤖 {target_group} ⨉ {title_map.get(stype, stype)}")
     
-    # 這裡的邏輯：如果切換了類股，通常不應該讀舊檔，因為舊檔可能是全類股的
-    # 但為了簡單，我們這裡還是先讀檔，如果使用者點了「執行新掃描」就會覆蓋
     saved_codes = db.load_scan_results(stype) 
     
     c1, c2 = st.columns([1, 4])
-    do_scan = c1.button("🔄 開始掃描", type="primary") # 顯眼的按鈕
+    do_scan = c1.button("🔄 開始分析與排名", type="primary")
     
-    # 提示訊息
-    c2.info(f"鎖定範圍：{target_group}")
+    if saved_codes and not do_scan:
+        c2.info(f"顯示上次記錄 (共 {len(saved_codes)} 檔)")
+    else:
+        c2.info(f"鎖定範圍：{target_group}")
 
     if do_scan:
         st.session_state['scan_results'] = []
         raw_results = []
         
-        # 1. 篩選類股池
+        # 1. 篩選類股
         full_pool = st.session_state['scan_pool']
         if target_group != "🔍 全部上市櫃":
-            # 根據 twstock 的 group 屬性過濾
             target_pool = [c for c in full_pool if c in twstock.codes and twstock.codes[c].group == target_group]
         else:
             target_pool = full_pool
 
-        if not target_pool:
-            st.error("此類股無代號資料"); st.stop()
+        if not target_pool: st.error("無符合資料"); st.stop()
 
+        # 2. 數據掃描
         bar = st.progress(0)
-        limit = 300 # 掃描上限，避免太久
-        count = 0
+        limit = 300 
         
         for i, c in enumerate(target_pool):
             if i >= limit: break
@@ -312,7 +307,8 @@ elif mode == 'scan':
                 if d is not None:
                     n = twstock.codes[c].name if c in twstock.codes else c
                     p = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
-                    sort_val = 0; info_txt = ""
+                    sort_val = -999999 # 預設低分
+                    info_txt = ""
                     
                     if isinstance(d, pd.DataFrame) and len(d) > 20:
                         vol = d['Volume'].iloc[-1]
@@ -322,51 +318,56 @@ elif mode == 'scan':
                         pct = ((p - prev) / prev) * 100
                         
                         valid = True
-                        # 策略過濾邏輯
+                        
+                        # --- 核心排序邏輯 (分數越高排越前面) ---
                         if stype == 'day': 
-                            sort_val = vol; info_txt = f"量: {int(vol/1000)}張"
+                            sort_val = vol # 量越大越好
+                            info_txt = f"🔥 成交量: {int(vol/1000)}張"
                         elif stype == 'short': 
-                            sort_val = (p - m5)/m5; info_txt = f"5日乖離: {sort_val*100:.1f}%"
+                            sort_val = (p - m5)/m5 # 乖離越大動能越強
+                            info_txt = f"⚡ 5日動能: {sort_val*100:.1f}%"
                         elif stype == 'long': 
-                            sort_val = (p - m60)/m60; info_txt = f"季線乖離: {sort_val*100:.1f}%"
-                            if p < m60: valid = False # 長線只找季線之上
+                            sort_val = (p - m60)/m60 # 趨勢向上
+                            info_txt = f"📈 趨勢強度: {sort_val*100:.1f}%"
+                            if p < m60: valid = False 
                         elif stype == 'top': 
-                            sort_val = pct; info_txt = f"漲幅: {pct:.2f}%"
+                            sort_val = pct # 漲幅
+                            info_txt = f"🏆 漲幅: {pct:.2f}%"
                         
                         if valid:
                             raw_results.append({'c': c, 'n': n, 'p': p, 'd': d, 'src': src, 'val': sort_val, 'info': info_txt})
             except: pass
         bar.empty()
         
-        # 排序與取前 100
+        # 3. 執行排序 (關鍵步驟：分數高排前面)
         raw_results.sort(key=lambda x: x['val'], reverse=True)
         top_100 = [x['c'] for x in raw_results[:100]]
         
-        # 只有在掃描全部時才存入全域存檔，若是個別類股掃描，暫時只存 session
         if target_group == "🔍 全部上市櫃":
             db.save_scan_results(stype, top_100)
         
         st.session_state['scan_results'] = raw_results[:100]
         st.rerun() 
 
-    # 顯示結果
+    # 4. 顯示結果 (包含 Rank)
     display_list = st.session_state['scan_results']
     
-    # 如果沒有當次結果，且是全部類股模式，才嘗試讀取歷史存檔
+    # 載入存檔時的邏輯
     if not display_list and not do_scan and saved_codes and target_group == "🔍 全部上市櫃":
          temp_list = []
-         placeholder = st.empty(); placeholder.text("載入歷史存檔...")
+         ph = st.empty(); ph.text("讀取排名記錄...")
          for i, c in enumerate(saved_codes[:100]):
              fid, _, d, src = db.get_stock_data(c)
              if d is not None:
                  p = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
                  n = twstock.codes[c].name if c in twstock.codes else c
-                 temp_list.append({'c':c, 'n':n, 'p':p, 'd':d, 'src':src, 'info':"存檔記錄"})
+                 temp_list.append({'c':c, 'n':n, 'p':p, 'd':d, 'src':src, 'info': f"推薦序 #{i+1}"})
          display_list = temp_list
-         placeholder.empty()
+         ph.empty()
 
     if display_list:
         for i, item in enumerate(display_list):
+            # 傳入 i+1 作為排名
             if ui.render_detailed_card(
                 item['c'], item['n'], item['p'], item['d'], item['src'], 
                 key_prefix=f"scan_{stype}", 
@@ -375,6 +376,6 @@ elif mode == 'scan':
             ):
                 nav_to('analysis', item['c'], item['n']); st.rerun()
     elif not do_scan:
-        st.warning("請點擊「開始掃描」以獲取最新分析結果。")
+        st.warning("請點擊「開始分析與排名」按鈕。")
                 
     ui.render_back_button(go_back)
