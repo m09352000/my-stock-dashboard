@@ -16,46 +16,49 @@ def inject_custom_css():
             padding-top: 0.2rem !important;
             padding-bottom: 0.2rem !important;
         }
+        /* 讓卡片內的文字排版更緊湊 */
+        div[data-testid="stMetricValue"] {
+            font-size: 1.2rem !important;
+        }
         </style>
     """, unsafe_allow_html=True)
 
-# --- 1. 標題與即時監控 ---
+# --- 1. 標題 ---
 def render_header(title, show_monitor=False):
     inject_custom_css()
     c1, c2 = st.columns([3, 1])
     c1.title(title)
     is_live = False
     if show_monitor:
-        st.caption("數據來源: Yahoo Finance / TWSE | V57 詳細資訊回歸版")
+        st.caption("數據來源: Yahoo Finance / TWSE | V58 自選股增強版")
         is_live = c2.toggle("🔴 啟動即時盤面", value=False)
     st.divider()
     return is_live
 
-# --- 2. 返回按鈕 ---
+# --- 2. 返回 ---
 def render_back_button(callback_func):
     st.divider()
     _, c2, _ = st.columns([2, 1, 2])
     if c2.button("⬅️ 返回上一頁", use_container_width=True):
         callback_func()
 
-# --- 3. 新手村卡片 ---
+# --- 3. 新手村 ---
 def render_term_card(title, content):
     with st.container(border=True):
         st.markdown(f"**{title}**")
         st.caption(content)
 
-# --- 4. 公司簡介 ---
+# --- 4. 簡介 ---
 def render_company_profile(summary):
     if summary and summary != "暫無詳細描述":
         with st.expander("🏢 公司簡介與業務", expanded=False):
             st.write(summary)
 
-# --- 5. 數據儀表板 (🔥 V57: 強制補回第二排詳細數據) ---
+# --- 5. 儀表板 ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              color_settings):
     with st.container():
-        # 第一排：價格核心
         m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("成交價", f"{curr:.2f}", f"{chg:.2f} ({pct:.2f}%)", delta_color=color_settings['delta'])
         m2.metric("最高價", f"{high:.2f}")
@@ -63,7 +66,6 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         m4.metric("振幅", f"{amp:.2f}%")
         m5.metric("主力動向", main_force)
         
-        # 第二排：量能核心 (這裡之前被刪掉了，現在補回來)
         v1, v2, v3, v4, v5 = st.columns(5)
         v1.metric("今日總量", f"{int(vol/1000):,} 張")
         diff_vol = int((vol - vol_yest)/1000)
@@ -72,12 +74,49 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         v4.metric("量能狀態", vol_status)
         v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 詳細診斷卡 (列表用) ---
+# --- 6. 戰術建議生成器 (V58: 這是產生詳細推薦的核心) ---
+def generate_trade_advice(price, m5, m20, m60, rsi):
+    advice = "數據不足"
+    color = "gray"
+    action = "觀望"
+    
+    # 1. 強勢多頭 (價格 > 5日 > 20日)
+    if price > m5 and m5 > m20:
+        dist_m5 = ((price - m5) / m5) * 100
+        if dist_m5 > 5: 
+            advice = "🔥 過熱"; action = f"乖離{dist_m5:.1f}%，等回測{m5:.1f}接"
+            color = "orange"
+        else:
+            advice = "🚀 強勢"; action = f"沿5日線 {m5:.1f} 續抱/加碼"
+            color = "red"
+            
+    # 2. 震盪偏多 (價格在 20日之上，但跌破 5日)
+    elif price > m20 and price < m5:
+        advice = "📈 回檔"; action = f"守月線 {m20:.1f} 找買點"
+        color = "orange"
+        
+    # 3. 空頭走勢 (價格 < 20日)
+    elif price < m20:
+        advice = "❄️ 弱勢"; action = f"反彈 {m20:.1f} 遇壓減碼"
+        color = "green"
+    
+    # RSI 特判
+    if rsi > 80: advice = "⚠️ 過熱"; action = "RSI>80 隨時準備獲利"
+    elif rsi < 20: advice = "💎 超賣"; action = "RSI<20 醞釀反彈"
+    
+    return advice, color, action
+
+# --- 7. 詳細診斷卡 (V58: 列表卡片升級) ---
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None, strategy_info=None):
+    """
+    V58 改版：在卡片上直接顯示「具體操作建議」與「詳細數據」
+    """
     chg_color = "black"
-    advice_txt = "數據不足"
-    advice_color = "gray"
     pct_txt = ""
+    advice_title = "分析中"
+    advice_color = "gray"
+    advice_action = ""
+    extra_info = "" # 顯示成交量或乖離
     
     if df is not None and not df.empty:
         try:
@@ -88,39 +127,58 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
             
             if chg > 0: chg_color = "red"; pct_txt = f"▲ {pct:.2f}%"
             elif chg < 0: chg_color = "green"; pct_txt = f"▼ {abs(pct):.2f}%"
+            else: chg_color = "gray"; pct_txt = "0.00%"
             
             if len(df) > 20:
                 m5 = df['Close'].rolling(5).mean().iloc[-1]
                 m20 = df['Close'].rolling(20).mean().iloc[-1]
-                if curr > m5 and m5 > m20: 
-                    advice_txt = "🔥 多頭強勢"; advice_color = "red"
-                elif curr < m5 and curr > m20:
-                    advice_txt = "📉 短線回檔"; advice_color = "orange"
-                elif curr < m20:
-                    advice_txt = "❄️ 空頭修正"; advice_color = "green"
-                else:
-                    advice_txt = "⚖️ 區間震盪"; advice_color = "gray"
+                m60 = df['Close'].rolling(60).mean().iloc[-1]
+                vol = df['Volume'].iloc[-1]
+                
+                # 計算 RSI
+                delta = df['Close'].diff()
+                u = delta.copy(); d = delta.copy()
+                u[u<0]=0; d[d>0]=0
+                rs = u.rolling(14).mean() / d.abs().rolling(14).mean()
+                rsi = (100 - 100/(1+rs)).iloc[-1] if not rs.isna().iloc[-1] else 50
+                
+                # 呼叫 V58 戰術生成
+                advice_title, advice_color, advice_action = generate_trade_advice(curr, m5, m20, m60, rsi)
+                
+                # 額外資訊：成交量 + 季線乖離
+                bias = ((curr-m60)/m60)*100
+                extra_info = f"量: {int(vol/1000)}張 | 季乖離: {bias:.1f}%"
+                
         except: pass
     
     rank_tag = f"#{rank} " if rank else ""
+    
+    # --- 卡片 UI (四欄位設計) ---
     with st.container(border=True):
-        c1, c2, c3, c4 = st.columns([1.5, 1.5, 3.5, 1])
+        # 1.代號  2.價格  3.詳細建議(最寬)  4.按鈕
+        c1, c2, c3, c4 = st.columns([1.2, 1.2, 3.0, 0.8])
+        
         with c1:
             st.markdown(f"**{rank_tag}{name}**")
             st.caption(f"{code}")
+            
         with c2:
             st.markdown(f"**{price:.2f}**")
             st.markdown(f":{chg_color}[{pct_txt}]")
+            
         with c3:
-            st.markdown(f"**{strategy_info if strategy_info else '狀態'}**")
-            st.markdown(f":{advice_color}[{advice_txt}]")
+            # V58 重點：顯示標題 + 具體操作建議 + 數據
+            st.markdown(f":{advice_color}[**{advice_title}**] {advice_action}")
+            st.caption(f"{extra_info}")
+            
         with c4:
-            st.write("")
+            st.write("") # 排版用
             if st.button("分析", key=f"{key_prefix}_{code}", use_container_width=True):
                 return True
+                
     return False
 
-# --- 7. K線圖 ---
+# --- 8. K線圖 ---
 def render_chart(df, title, color_settings):
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
@@ -143,16 +201,14 @@ def render_chart(df, title, color_settings):
     fig.update_layout(height=500, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 8. AI 報告 (🔥 V57: 重新寫入分頁邏輯，確保它存在) ---
+# --- 9. AI 報告 (保留 V57 的完整版) ---
 def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low):
     st.subheader("🤖 AI 戰略分析報告")
     
-    # 計算 Pivot (關鍵價位)
     pivot = (high + low + curr) / 3
     r1 = 2 * pivot - low
     s1 = 2 * pivot - high
     
-    # 🔥 這裡必須使用 st.tabs，您之前的版本可能這裡被簡化掉了
     t1, t2 = st.tabs(["📊 詳細趨勢診斷", "🎯 關鍵價位試算"])
     
     with t1:
@@ -163,25 +219,22 @@ def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low):
             elif curr < m20 and m20 < m60: st.error("❄️ **空頭排列**：均線反壓，建議保守。")
             elif curr > m20: st.warning("🌤️ **震盪偏多**：站上月線，留意前高。")
             else: st.info("🌧️ **震盪偏空**：月線之下，等待底部。")
-                
         with c2:
             st.markdown("#### ⚡ 動能指標 (RSI)")
             st.metric("RSI (14)", f"{rsi:.1f}")
-            if rsi > 80: st.write("⚠️ **過熱警戒**：短線有回檔風險。")
-            elif rsi < 20: st.write("💎 **超賣區**：隨時可能反彈。")
-            else: st.write("✅ **動能中性**：無明顯過熱訊號。")
-            
+            if rsi > 80: st.write("⚠️ **過熱警戒**")
+            elif rsi < 20: st.write("💎 **超賣區**")
+            else: st.write("✅ **動能中性**")
         with c3:
-            st.markdown("#### 📏 乖離率分析")
+            st.markdown("#### 📏 乖離率")
             st.metric("季線乖離", f"{bias:.2f}%")
-            if bias > 20: st.write("⚠️ **正乖離過大**：容易拉回。")
-            elif bias < -20: st.write("💎 **負乖離過大**：有機會反彈。")
-            else: st.write("✅ **乖離正常**：沿趨勢線運行。")
+            if bias > 20: st.write("⚠️ **正乖離過大**")
+            elif bias < -20: st.write("💎 **負乖離過大**")
+            else: st.write("✅ **乖離正常**")
 
     with t2:
-        st.markdown("#### 🎯 Pivot Point 關鍵價位 (當沖/隔日沖參考)")
-        st.info("計算基礎：(最高+最低+收盤)/3")
+        st.markdown("#### 🎯 Pivot Point 關鍵價位")
         cp1, cp2, cp3 = st.columns(3)
-        cp1.metric("壓力位 (R1)", f"{r1:.2f}", help="預估上方第一道壓力，突破代表極強")
-        cp2.metric("中軸 (Pivot)", f"{pivot:.2f}", help="多空分水嶺，站上偏多，跌破偏空")
-        cp3.metric("支撐位 (S1)", f"{s1:.2f}", help="預估下方第一道支撐，跌破代表極弱")
+        cp1.metric("壓力位 (R1)", f"{r1:.2f}")
+        cp2.metric("中軸 (Pivot)", f"{pivot:.2f}")
+        cp3.metric("支撐位 (S1)", f"{s1:.2f}")
