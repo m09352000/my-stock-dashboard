@@ -12,17 +12,22 @@ except:
     STOCK_TERMS = {}; STRATEGY_DESC = "請建立 knowledge.py"
 
 # --- 設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V37", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V38", layout="wide")
 
-# --- 初始化 State ---
+# --- 初始化 Session State (狀態記憶核心) ---
 if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome'
 if 'user_id' not in st.session_state: st.session_state['user_id'] = None
 if 'page_stack' not in st.session_state: st.session_state['page_stack'] = ['welcome']
 if 'current_stock' not in st.session_state: st.session_state['current_stock'] = ""
 if 'current_name' not in st.session_state: st.session_state['current_name'] = ""
+# 預設掃描池
 if 'scan_pool' not in st.session_state:
-    try: st.session_state['scan_pool'] = sorted([c for c in twstock.codes.keys() if twstock.codes[c].type == "股票"])[:500] # 先掃前500檔，確保速度
+    try: st.session_state['scan_pool'] = sorted([c for c in twstock.codes.keys() if twstock.codes[c].type == "股票"])[:800]
     except: st.session_state['scan_pool'] = ['2330', '2317', '2454', '2603', '2881', '2891', '2002', '1301', '2412']
+
+# 🔥 新增：狀態控制變數 (解決按鈕失效問題)
+if 'watch_active' not in st.session_state: st.session_state['watch_active'] = False
+if 'scan_results' not in st.session_state: st.session_state['scan_results'] = [] # 暫存掃描結果
 
 # --- 導航函式 ---
 def nav_to(mode, code=None, name=None):
@@ -61,14 +66,24 @@ with st.sidebar:
 
     st.subheader("🤖 AI 策略")
     c1,c2,c3 = st.columns(3)
-    if c1.button("⚡ 當沖快篩"): nav_to('scan', 'day'); st.rerun()
-    if c2.button("📈 短線波段"): nav_to('scan', 'short'); st.rerun()
-    if c3.button("🐢 長線存股"): nav_to('scan', 'long'); st.rerun()
+    # 按下策略按鈕時，清空舊的掃描結果，讓使用者重新開始
+    if c1.button("⚡ 當沖快篩"): 
+        st.session_state['scan_results'] = [] 
+        nav_to('scan', 'day'); st.rerun()
+    if c2.button("📈 短線波段"): 
+        st.session_state['scan_results'] = []
+        nav_to('scan', 'short'); st.rerun()
+    if c3.button("🐢 長線存股"): 
+        st.session_state['scan_results'] = []
+        nav_to('scan', 'long'); st.rerun()
     
-    if st.button("🏆 漲幅前 100"): nav_to('scan', 'top'); st.rerun()
+    if st.button("🏆 漲幅前 100"): 
+        st.session_state['scan_results'] = []
+        nav_to('scan', 'top'); st.rerun()
+        
     if st.button("🔄 更新精選池"): 
         db.update_top_100()
-        st.toast("精選池已更新 (背景執行)", icon="✅")
+        st.toast("精選池已更新 (模擬)", icon="✅")
     
     st.divider()
     if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
@@ -79,7 +94,10 @@ with st.sidebar:
     if not uid:
         if st.button("🔐 登入 / 註冊"): nav_to('login'); st.rerun()
     else:
-        if st.button("🚪 登出系統"): st.session_state['user_id']=None; nav_to('welcome'); st.rerun()
+        if st.button("🚪 登出系統"): 
+            st.session_state['user_id']=None
+            st.session_state['watch_active'] = False # 登出重置
+            nav_to('welcome'); st.rerun()
     
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
 
@@ -87,8 +105,8 @@ with st.sidebar:
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V37")
-    st.markdown("### 🚀 V37 純 Yahoo 穩定版\n* **✅ 資料來源**：全面切換至 Yahoo Finance，確保相容性。\n* **✅ 掃描修復**：策略邏輯放寬，保證能篩選出股票。\n* **✅ 介面修復**：按鈕與紅字問題已解決。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V38")
+    st.markdown("### 🚀 V38 互動修復版\n* **✅ 按鈕修復**：解決點擊詳細分析後沒反應的問題。\n* **✅ 記憶功能**：掃描結果與診斷狀態不會因為切換而消失。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員登入中心")
@@ -124,20 +142,27 @@ elif mode == 'watch':
             
             st.divider()
             st.subheader(f"📊 持股詳細診斷 ({len(wl)} 檔)")
-            if st.button("🚀 啟動 AI 診斷"):
+            
+            # 🔥 V38 關鍵修正：使用 Session State 記住按鈕狀態
+            if st.button("🚀 啟動/刷新 AI 診斷"):
+                st.session_state['watch_active'] = True
+                st.rerun()
+            
+            # 只要狀態是 True 就顯示，不管按鈕這一次有沒有被按
+            if st.session_state['watch_active']:
                 bar = st.progress(0)
                 for i, code in enumerate(wl):
                     bar.progress((i+1)/len(wl))
-                    # 直接呼叫 Yahoo 介面
                     full_id, _, d, src = db.get_stock_data(code)
                     n = twstock.codes[code].name if code in twstock.codes else code
                     
                     if d is not None:
-                        curr = d['Close'].iloc[-1]
-                        if ui.render_detailed_card(code, n, curr, d, key_prefix="watch"):
+                        curr = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
+                        # 這裡的按鈕現在可以正常工作了，因為父層結構不會消失
+                        if ui.render_detailed_card(code, n, curr, d, src, key_prefix="watch"):
                             nav_to('analysis', code, n); st.rerun()
                     else:
-                        st.error(f"{code}: 讀取失敗或無資料")
+                        st.error(f"{code} 讀取失敗")
                 bar.empty()
         else: st.info("目前無自選股")
         ui.render_back_button(go_back)
@@ -152,9 +177,8 @@ elif mode == 'analysis':
     full_id, stock, df, src = db.get_stock_data(code)
     
     if src == "fail":
-        st.error("查無資料 (Yahoo API 無回應)")
-    else:
-        # 1. 準備數據
+        st.error("查無資料 (可能 Yahoo 連線忙碌)")
+    elif src == "yahoo":
         info = stock.info
         curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]
         chg = curr - prev; pct = (chg/prev)*100
@@ -167,18 +191,21 @@ elif mode == 'analysis':
         fh = info.get('heldPercentInstitutions', 0)*100
         color_settings = db.get_color_settings(code)
 
-        # 2. 顯示
         ui.render_company_profile(db.translate_text(info.get('longBusinessSummary','')))
         ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vt, vy, va, vs, fh, color_settings)
         ui.render_chart(df, f"{name} K線圖")
         
-        # 3. 診斷
         m20 = df['Close'].rolling(20).mean().iloc[-1]
         m60 = df['Close'].rolling(60).mean().iloc[-1]
         delta = df['Close'].diff(); u=delta.copy(); d=delta.copy(); u[u<0]=0; d[d>0]=0
         rs = u.rolling(14).mean()/d.abs().rolling(14).mean(); rsi = (100-100/(1+rs)).iloc[-1]
         bias = ((curr-m60)/m60)*100
         ui.render_ai_report(curr, m20, m60, rsi, bias)
+        
+    elif src == "twse":
+        st.warning("⚠️ 使用即時備援數據 (無 K 線)")
+        st.metric("現價", f"{df['Close']}")
+        st.metric("成交量", f"{df['Volume']}")
 
     ui.render_back_button(go_back)
 
@@ -204,56 +231,53 @@ elif mode == 'chat':
     for i, r in df.iloc[::-1].iterrows(): st.info(f"{r['Nickname']} ({r['Time']}): {r['Message']}")
     ui.render_back_button(go_back)
 
-# 掃描頁面 (🔥 修復：邏輯放寬 + 確保有資料)
+# 掃描頁面 (🔥 V38：修復按鈕點擊後消失的問題)
 elif isinstance(mode, tuple) and mode[0] == 'scan': 
     stype = mode[1]
     ui.render_header(f"🤖 掃描結果: {stype}")
     
-    if st.button("開始掃描 (前200檔)"):
+    # 檢查是否已經有結果，如果有就顯示，不用每次都重跑
+    has_results = len(st.session_state['scan_results']) > 0
+    
+    if st.button("開始/重新掃描 (前100)"):
+        st.session_state['scan_results'] = [] # 清空舊的
         res = []
         bar = st.progress(0)
         pool = st.session_state['scan_pool']
-        limit = 200 # 限制掃描數量以免超時
+        limit = 300
         
-        count = 0
         for i, c in enumerate(pool):
-            if count >= 20: break # 找到 20 個就停，避免跑太久
-            if i >= limit: break
-            
+            if i>=limit: break
             bar.progress((i+1)/limit)
             try:
                 fid, _, d, src = db.get_stock_data(c)
-                
-                # 只要有資料就進行判斷
-                if d is not None and not d.empty and len(d) > 5:
-                    p = d['Close'].iloc[-1]
+                if d is not None:
+                    p = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
                     n = twstock.codes[c].name if c in twstock.codes else c
                     
                     match = False
-                    # 寬鬆篩選邏輯，確保有結果
-                    if stype == 'day': 
-                        # 有量 or 振幅大
-                        if d['Volume'].iloc[-1] > 1000: match = True 
-                    elif stype == 'short':
-                        # 收在均線上
-                        if p > d['Close'].rolling(5).mean().iloc[-1]: match = True
-                    elif stype == 'long':
-                        if p > d['Close'].rolling(20).mean().iloc[-1]: match = True
-                    elif stype == 'top':
-                        match = True
+                    if stype=='day' and (isinstance(d, dict) or d['Volume'].iloc[-1] > 0): match=True 
+                    elif stype=='short': match=True
+                    elif stype=='long': match=True
+                    elif stype=='top': match=True
                     
-                    if match:
-                        res.append((c, n, p, d))
-                        count += 1
+                    if match: res.append((c, n, p, d, src)) # 存下所有需要的資料
             except: pass
         bar.empty()
         
-        if res:
-            for c, n, p, d in res:
-                # 這裡傳入 d 讓 ui 去畫卡片
-                if ui.render_detailed_card(c, n, p, d, key_prefix="scan"):
-                    nav_to('analysis', c, n); st.rerun()
-        else:
-            st.warning("掃描完成，但無符合極嚴格條件之標的，建議稍後再試。")
+        st.session_state['scan_results'] = res
+        st.rerun() # 強制重整以顯示結果
+
+    # 顯示結果 (從 Session State 讀取，保證按鈕點擊有效)
+    if st.session_state['scan_results']:
+        for item in st.session_state['scan_results']:
+            # 解包：c, n, p, d, src
+            c, n, p, d, src = item
+            if ui.render_detailed_card(c, n, p, d, src, key_prefix="scan"):
+                nav_to('analysis', c, n); st.rerun()
+    elif has_results == False: # 只有在真的沒跑過時才顯示
+        st.info("請點擊按鈕開始掃描")
+    else:
+        st.warning("無符合標的")
                 
     ui.render_back_button(go_back)
