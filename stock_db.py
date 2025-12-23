@@ -1,18 +1,27 @@
 import pandas as pd
 import yfinance as yf
+import twstock
 import json
 import os
 import hashlib
 from datetime import datetime
 from deep_translator import GoogleTranslator
 
-# 檔案路徑
+# --- 📂 檔案路徑設定 (V41 新增獨立資料庫) ---
 DB_USERS = "db_users.json"
 DB_WATCHLISTS = "db_watchlists.json"
 DB_HISTORY = "db_history.json"
 DB_COMMENTS = "db_comments.csv"
 
-# --- 資料讀寫 ---
+# 策略專屬資料庫路徑
+SCAN_FILES = {
+    'day': 'db_scan_day.json',     # 當沖存這裡
+    'short': 'db_scan_short.json', # 短線存這裡
+    'long': 'db_scan_long.json',   # 長線存這裡
+    'top': 'db_scan_top.json'      # 漲幅存這裡
+}
+
+# --- 資料讀寫基礎函式 ---
 def load_json(path, default):
     if not os.path.exists(path):
         with open(path, 'w') as f: json.dump(default, f)
@@ -23,6 +32,21 @@ def load_json(path, default):
 
 def save_json(path, data):
     with open(path, 'w') as f: json.dump(data, f)
+
+# --- 🔥 V41 新增：策略結果存取功能 ---
+def save_scan_results(mode, codes_list):
+    """將掃描到的股票代號清單，存入對應的檔案"""
+    if mode in SCAN_FILES:
+        filename = SCAN_FILES[mode]
+        # 我們只存代號，保持檔案輕量，下次讀取時再抓最新股價
+        save_json(filename, codes_list)
+
+def load_scan_results(mode):
+    """讀取特定策略上次的掃描結果"""
+    if mode in SCAN_FILES:
+        filename = SCAN_FILES[mode]
+        return load_json(filename, [])
+    return []
 
 # --- 會員系統 ---
 def login_user(username, password):
@@ -81,10 +105,9 @@ def get_comments():
 
 # --- 股票工具 ---
 def get_color_settings(stock_id):
-    # 台股邏輯：紅漲綠跌
     if ".TW" in stock_id.upper() or ".TWO" in stock_id.upper() or stock_id.isdigit():
         return {"up": "#FF0000", "down": "#00FF00", "delta": "inverse"}
-    return {"up": "#00FF00", "down": "#FF0000", "delta": "normal"}
+    else: return {"up": "#00FF00", "down": "#FF0000", "delta": "normal"}
 
 def translate_text(text):
     if not text: return "暫無詳細描述"
@@ -92,24 +115,15 @@ def translate_text(text):
     except: return text
 
 def update_top_100():
-    # 這裡僅回傳 True，實際刷新由 app 端重跑
     return True
 
-# --- 🔥 單引擎股票抓取 (純 Yahoo) ---
+# --- 雙引擎股票抓取 ---
 def get_stock_data(code):
-    # 自動嘗試加上後綴
     suffixes = ['.TW', '.TWO'] if code.isdigit() else ['']
-    
     for s in suffixes:
         try:
-            full_code = f"{code}{s}"
-            stock = yf.Ticker(full_code)
-            # 抓取 3 個月資料，確保有足夠 K 線
+            stock = yf.Ticker(f"{code}{s}")
             df = stock.history(period="3mo")
-            
-            if not df.empty:
-                return full_code, stock, df, "yahoo"
-        except:
-            continue
-            
+            if not df.empty: return f"{code}{s}", stock, df, "yahoo"
+        except: pass
     return None, None, None, "fail"
