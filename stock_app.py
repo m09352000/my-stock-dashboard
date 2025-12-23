@@ -12,7 +12,7 @@ except:
     STOCK_TERMS = {}; STRATEGY_DESC = "請建立 knowledge.py"
 
 # --- 設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V44", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V43", layout="wide")
 
 # --- 初始化 State ---
 if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome'
@@ -98,12 +98,12 @@ with st.sidebar:
     
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
 
-# --- 主畫面 ---
+# --- 主畫面路由 ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V44")
-    st.markdown("### 🚀 V44 國際化配色版\n* **🇹🇼 台股**：紅漲綠跌。\n* **🇺🇸 美股**：綠漲紅跌。\n* **✅ 全面修復**：策略、按鈕、K線圖完美對應。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V43")
+    st.markdown("### 🚀 V43 終極穩定版\n* **✅ 0 紅字**：徹底修復語法錯誤。\n* **✅ 策略分流**：不同按鈕顯示不同排序結果。\n* **💾 獨立存檔**：掃描結果不再消失。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員登入中心")
@@ -153,6 +153,7 @@ elif mode == 'watch':
                     
                     if d is not None:
                         curr = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
+                        # 傳入 src 避免參數錯誤
                         if ui.render_detailed_card(code, n, curr, d, src, key_prefix="watch"):
                             nav_to('analysis', code, n); st.rerun()
                     else:
@@ -180,14 +181,11 @@ elif mode == 'analysis':
         vol_r = vt/va if va>0 else 1
         vs = "🔥 爆量" if vol_r>1.5 else ("💤 量縮" if vol_r<0.6 else "正常")
         fh = info.get('heldPercentInstitutions', 0)*100
-        
-        # 🔥 取得顏色設定
         color_settings = db.get_color_settings(code)
 
         ui.render_company_profile(db.translate_text(info.get('longBusinessSummary','')))
         ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vt, vy, va, vs, fh, color_settings)
-        
-        # 🔥 傳入顏色設定給 K 線圖
+        # 🔥 傳入 color_settings
         ui.render_chart(df, f"{name} K線圖", color_settings)
         
         m20 = df['Close'].rolling(20).mean().iloc[-1]
@@ -224,19 +222,21 @@ elif mode == 'chat':
     for i, r in df.iloc[::-1].iterrows(): st.info(f"{r['Nickname']} ({r['Time']}): {r['Message']}")
     ui.render_back_button(go_back)
 
-# --- 掃描頁面 ---
+# --- 掃描頁面 (🔥 V43: 完整邏輯) ---
 elif mode == 'scan': 
     stype = st.session_state['current_stock']
     title_map = {'day': '當沖快篩', 'short': '短線波段', 'long': '長線存股', 'top': '漲幅前 100'}
     
     ui.render_header(f"🤖 掃描結果: {title_map.get(stype, stype)}")
     
+    # 讀取存檔
     saved_codes = db.load_scan_results(stype)
     
     c1, c2 = st.columns([1, 4])
     do_scan = c1.button("🔄 重新掃描 (前200檔)")
     if saved_codes: c2.info(f"上次掃描：{len(saved_codes)} 檔")
     
+    # 執行掃描
     if do_scan:
         st.session_state['scan_results'] = []
         raw_results = []
@@ -283,6 +283,7 @@ elif mode == 'scan':
             except: pass
         bar.empty()
         
+        # 排序與存檔
         raw_results.sort(key=lambda x: x['val'], reverse=True)
         top_50 = [x['c'] for x in raw_results[:50]]
         db.save_scan_results(stype, top_50)
@@ -290,11 +291,13 @@ elif mode == 'scan':
         st.session_state['scan_results'] = raw_results[:50]
         st.rerun() 
 
+    # 顯示結果 (優先顯示剛掃描的，若無則讀取存檔)
     display_list = st.session_state['scan_results']
     
     if not display_list and saved_codes:
+        # 如果是讀檔，需要重新抓取股價以顯示最新狀態
         temp_list = []
-        for c in saved_codes[:20]: 
+        for c in saved_codes[:20]: # 讀取前20檔避免太慢
              fid, _, d, src = db.get_stock_data(c)
              if d is not None:
                  p = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
