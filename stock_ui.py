@@ -2,7 +2,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# --- 1. 標題與監控 ---
+# --- 1. 頁面標題與監控按鈕 ---
 def render_header(title, show_monitor=False):
     c1, c2 = st.columns([3, 1])
     c1.title(title)
@@ -12,7 +12,7 @@ def render_header(title, show_monitor=False):
     st.divider()
     return is_live
 
-# --- 2. 底部返回 ---
+# --- 2. 底部返回按鈕 ---
 def render_back_button(callback_func):
     st.divider()
     if st.button("⬅️ 返回上一頁", use_container_width=True):
@@ -25,7 +25,7 @@ def render_term_card(title, content):
 # --- 4. 公司簡介 ---
 def render_company_profile(summary):
     if summary and summary != "暫無詳細描述":
-        with st.expander("🏢 公司簡介", expanded=False):
+        with st.expander("🏢 公司簡介 (點擊展開)", expanded=False):
             st.write(summary)
 
 # --- 5. 詳細數據儀表板 ---
@@ -45,51 +45,73 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     v4.metric("量能狀態", vol_status)
     v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 自選股/掃描 詳細診斷卡 (純 Yahoo 版) ---
-def render_detailed_card(code, name, price, df, key_prefix="btn"):
-    # 預設值
+# --- 6. 自選股/掃描 詳細診斷卡 (🔥 V39 修復重點) ---
+def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn"):
+    # 預設狀態
     status_color = "gray"
-    trend_txt = "資料讀取中"
-    rsi_txt = "-"
-    vol_txt = "-"
+    trend_txt = "等待分析"
+    rsi_info = "-"
+    vol_info = "-"
     
-    # 只要有資料就計算 (寬鬆模式)
-    if df is not None and not df.empty and len(df) > 5:
-        curr = df['Close'].iloc[-1]
-        # 簡單計算均線
-        m20 = df['Close'].rolling(20).mean().iloc[-1] if len(df) > 20 else curr
-        
-        # 趨勢
-        if curr > m20:
-            trend_txt = "🔥 多頭格局"
-            status_color = "green"
-        else:
-            trend_txt = "❄️ 空頭整理"
-            status_color = "red"
+    # 邏輯判斷 (只要有資料就跑)
+    if df is not None and not df.empty:
+        try:
+            # 取得最新一筆資料
+            if source_type == "yahoo":
+                curr = df['Close'].iloc[-1]
+                vol_curr = df['Volume'].iloc[-1]
+                
+                # 計算均線 (如果有足夠資料)
+                if len(df) > 20:
+                    m20 = df['Close'].rolling(20).mean().iloc[-1]
+                    m60 = df['Close'].rolling(60).mean().iloc[-1]
+                    
+                    if curr > m20 and m20 > m60: 
+                        trend_txt = "🔥 多頭強勢"
+                        status_color = "green"
+                    elif curr < m20 and m20 < m60: 
+                        trend_txt = "❄️ 空頭修正"
+                        status_color = "red"
+                    elif curr > m20:
+                        trend_txt = "📈 站上月線"
+                        status_color = "orange"
+                    else:
+                        trend_txt = "⚖️ 盤整震盪"
+                
+                # 計算 RSI
+                if len(df) > 15:
+                    delta = df['Close'].diff()
+                    u = delta.copy(); d = delta.copy(); u[u<0]=0; d[d>0]=0
+                    rs = u.rolling(14).mean()/d.abs().rolling(14).mean()
+                    rsi = (100 - 100/(1+rs)).iloc[-1]
+                    rsi_msg = "過熱" if rsi>80 else "超賣" if rsi<20 else "正常"
+                    rsi_info = f"{rsi:.1f} ({rsi_msg})"
+                
+                # 計算量能
+                vol_avg = df['Volume'].tail(5).mean()
+                if vol_avg > 0:
+                    v_ratio = vol_curr / vol_avg
+                    vol_info = f"爆量 {v_ratio:.1f}倍" if v_ratio > 1.5 else "量縮" if v_ratio < 0.6 else "量平"
+            
+            else: # TWSE 只有即時價
+                trend_txt = "即時報價 (無K線)"
+                status_color = "blue"
+                
+        except:
+            trend_txt = "計算錯誤"
 
-        # RSI (如果有足夠資料)
-        if len(df) > 15:
-            delta = df['Close'].diff()
-            u = delta.copy(); d = delta.copy(); u[u<0]=0; d[d>0]=0
-            rs = u.rolling(14).mean()/d.abs().rolling(14).mean()
-            rsi = (100 - 100/(1+rs)).iloc[-1]
-            rsi_txt = f"{rsi:.1f}"
-        
-        # 量能
-        vol_curr = df['Volume'].iloc[-1]
-        vol_avg = df['Volume'].tail(5).mean()
-        if vol_avg > 0:
-            ratio = vol_curr / vol_avg
-            vol_txt = "🔥 爆量" if ratio > 1.5 else "量縮" if ratio < 0.6 else "正常"
-
+    # 繪製卡片
     with st.container(border=True):
         c1, c2, c3, c4, c5 = st.columns([1, 1.5, 2, 2.5, 1])
         c1.markdown(f"### {code}")
         c2.write(f"**{name}**")
         c3.metric("現價", f"{price:.2f}")
-        c4.markdown(f":{status_color}[{trend_txt}]")
-        c4.caption(f"RSI: {rsi_txt} | 量: {vol_txt}")
-        # 回傳按鈕
+        
+        # 詳細診斷顯示區
+        c4.markdown(f"**趨勢**: :{status_color}[{trend_txt}]")
+        c4.caption(f"RSI: {rsi_info} | 量能: {vol_info}")
+        
+        # 按鈕
         return c5.button("詳細分析", key=f"{key_prefix}_{code}")
 
 # --- 7. K線圖 ---
@@ -111,17 +133,18 @@ def render_ai_report(curr, m20, m60, rsi, bias):
     c1, c2, c3 = st.columns(3)
     with c1:
         st.info("📈 **趨勢研判**")
-        if curr > m20: st.markdown("### 🔥 強勢多頭"); st.write("股價位於月線之上，趨勢偏多。")
-        else: st.markdown("### ❄️ 弱勢整理"); st.write("股價跌破月線，建議觀望。")
+        if curr > m20 and m20 > m60: st.markdown("### 🔥 強勢多頭"); st.write("站穩月線，均線發散向上，多方控盤。")
+        elif curr < m20 and m20 < m60: st.markdown("### ❄️ 空頭修正"); st.write("跌破月線，上方套牢壓力重，建議保守。")
+        else: st.markdown("### ⚖️ 盤整震盪"); st.write("均線糾結，方向不明，建議區間操作。")
     with c2:
         st.warning("⚡ **動能 (RSI)**")
         st.metric("數值", f"{rsi:.1f}")
-        if rsi > 80: st.write("⚠️ 過熱")
-        elif rsi < 20: st.write("💎 超賣")
-        else: st.write("✅ 中性")
+        if rsi > 80: st.write("⚠️ **過熱警示**：短線買盤過強，隨時回檔。")
+        elif rsi < 20: st.write("💎 **超賣訊號**：短線殺過頭，醞釀反彈。")
+        else: st.write("✅ **動能中性**：健康輪動。")
     with c3:
         st.error("📏 **乖離率**")
         st.metric("數值", f"{bias:.2f}%")
-        if bias > 20: st.write("⚠️ 正乖離大")
-        elif bias < -20: st.write("💎 負乖離大")
-        else: st.write("✅ 正常")
+        if bias > 20: st.write("⚠️ **正乖離過大**：股價漲幅偏離基本面。")
+        elif bias < -20: st.write("💎 **負乖離過大**：股價超跌。")
+        else: st.write("✅ **乖離正常**。")
