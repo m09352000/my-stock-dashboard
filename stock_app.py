@@ -12,7 +12,7 @@ except:
     STOCK_TERMS = {}; STRATEGY_DESC = "請建立 knowledge.py"
 
 # --- 設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V40", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V41", layout="wide")
 
 # --- 初始化 State ---
 if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome'
@@ -26,7 +26,8 @@ if 'scan_pool' not in st.session_state:
 
 # 狀態控制
 if 'watch_active' not in st.session_state: st.session_state['watch_active'] = False
-if 'scan_results' not in st.session_state: st.session_state['scan_results'] = []
+# V41: 這裡改為字典，分別暫存不同策略的顯示結果
+if 'scan_results_cache' not in st.session_state: st.session_state['scan_results_cache'] = {}
 
 # --- 導航函式 ---
 def nav_to(mode, code=None, name=None):
@@ -65,21 +66,13 @@ with st.sidebar:
 
     st.subheader("🤖 AI 策略")
     c1,c2,c3 = st.columns(3)
-    # 按下策略按鈕 -> 進入 scan 模式，並把策略類型存在 current_stock
-    if c1.button("⚡ 當沖快篩"): 
-        st.session_state['scan_results'] = [] 
-        nav_to('scan', 'day'); st.rerun()
-    if c2.button("📈 短線波段"): 
-        st.session_state['scan_results'] = []
-        nav_to('scan', 'short'); st.rerun()
-    if c3.button("🐢 長線存股"): 
-        st.session_state['scan_results'] = []
-        nav_to('scan', 'long'); st.rerun()
     
-    if st.button("🏆 漲幅前 100"): 
-        st.session_state['scan_results'] = []
-        nav_to('scan', 'top'); st.rerun()
-        
+    # 🔥 按鈕按下時，只負責切換頁面，讀取邏輯交給主畫面處理
+    if c1.button("⚡ 當沖快篩"): nav_to('scan', 'day'); st.rerun()
+    if c2.button("📈 短線波段"): nav_to('scan', 'short'); st.rerun()
+    if c3.button("🐢 長線存股"): nav_to('scan', 'long'); st.rerun()
+    
+    if st.button("🏆 漲幅前 100"): nav_to('scan', 'top'); st.rerun()
     if st.button("🔄 更新精選池"): 
         db.update_top_100()
         st.toast("精選池已更新", icon="✅")
@@ -104,8 +97,8 @@ with st.sidebar:
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V40")
-    st.markdown("### 🚀 V40 終極修復版\n* **✅ 頁面修復**：策略掃描按鈕點擊後保證顯示頁面。\n* **🏆 排名功能**：掃描結果新增 #1, #2 排名顯示。\n* **🇹🇼 中文優化**：股票名稱強制顯示中文。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V41")
+    st.markdown("### 🚀 V41 獨立資料庫版\n* **🗂️ 獨立存檔**：當沖、短線、長線的結果現在分開儲存，互不干擾。\n* **💾 自動記憶**：離開頁面再回來，上次掃描的結果還會在。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員登入中心")
@@ -227,19 +220,24 @@ elif mode == 'chat':
     for i, r in df.iloc[::-1].iterrows(): st.info(f"{r['Nickname']} ({r['Time']}): {r['Message']}")
     ui.render_back_button(go_back)
 
-# 掃描頁面 (🔥 修復：使用 mode == 'scan'，不再使用 isinstance)
+# --- 掃描頁面 (🔥 V41: 讀取/寫入 獨立檔案) ---
 elif mode == 'scan': 
-    # 策略類型存在 current_stock 裡 (從 nav_to 傳來的)
+    # stype 為 'day', 'short', 'long', 'top'
     stype = st.session_state['current_stock']
     title_map = {'day': '當沖快篩', 'short': '短線波段', 'long': '長線存股', 'top': '漲幅前 100'}
     
     ui.render_header(f"🤖 掃描結果: {title_map.get(stype, stype)}")
     
-    has_results = len(st.session_state['scan_results']) > 0
+    # 1. 嘗試從資料庫讀取上次存檔的代號
+    saved_codes = db.load_scan_results(stype)
     
-    if st.button("開始/重新掃描 (前100)"):
-        st.session_state['scan_results'] = []
-        res = []
+    c1, c2 = st.columns([1, 4])
+    start_btn = c1.button("🔄 重新掃描 (前100)")
+    if saved_codes: c2.info(f"已載入上次存檔：共 {len(saved_codes)} 檔")
+    
+    # 如果按下按鈕，執行重新掃描
+    if start_btn:
+        new_results = []
         bar = st.progress(0)
         pool = st.session_state['scan_pool']
         limit = 300
@@ -251,33 +249,36 @@ elif mode == 'scan':
                 fid, _, d, src = db.get_stock_data(c)
                 if d is not None:
                     p = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
-                    # 強制使用中文名稱
-                    n = twstock.codes[c].name if c in twstock.codes else c
-                    
                     match = False
+                    # 寬鬆篩選確保有結果
                     if stype=='day' and (isinstance(d, dict) or d['Volume'].iloc[-1] > 0): match=True 
                     elif stype=='short': match=True
                     elif stype=='long': match=True
                     elif stype=='top': match=True
                     
-                    if match: res.append((c, n, p, d, src))
+                    if match: new_results.append(c) # 只存代號
             except: pass
         bar.empty()
         
-        st.session_state['scan_results'] = res
+        # 存入獨立資料庫
+        db.save_scan_results(stype, new_results)
+        saved_codes = new_results # 更新當前顯示清單
         st.rerun() 
 
-    # 顯示結果 (🔥 這裡加上了排名 i+1)
-    if st.session_state['scan_results']:
-        for i, item in enumerate(st.session_state['scan_results']):
-            # 解包：c, n, p, d, src
-            c, n, p, d, src = item
-            # 傳入 rank=i+1 顯示排名
-            if ui.render_detailed_card(c, n, p, d, src, key_prefix="scan", rank=i+1):
-                nav_to('analysis', c, n); st.rerun()
-    elif has_results == False:
-        st.info("請點擊按鈕開始掃描")
+    # 2. 顯示結果 (從代號清單讀取最新股價)
+    if saved_codes:
+        # 為了效能，這裡我們只抓前 20 檔顯示，或者你可以選擇全部顯示但會慢一點
+        for i, c in enumerate(saved_codes[:50]): # 限制顯示數量避免卡頓
+            full_id, _, d, src = db.get_stock_data(c)
+            n = twstock.codes[c].name if c in twstock.codes else c
+            
+            if d is not None:
+                p = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
+                # 顯示卡片 (帶有排名)
+                if ui.render_detailed_card(c, n, p, d, src, key_prefix=f"scan_{stype}", rank=i+1):
+                    nav_to('analysis', c, n); st.rerun()
     else:
-        st.warning("無符合標的")
+        if not start_btn: st.info("目前無存檔記錄，請點擊「重新掃描」。")
+        else: st.warning("無符合標的")
                 
     ui.render_back_button(go_back)
