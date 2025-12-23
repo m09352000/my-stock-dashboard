@@ -28,12 +28,14 @@ def render_company_profile(summary):
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              color_settings):
+    
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("成交價", f"{curr:.2f}", f"{chg:.2f} ({pct:.2f}%)", delta_color=color_settings['delta'])
     m2.metric("最高價", f"{high:.2f}")
     m3.metric("最低價", f"{low:.2f}")
     m4.metric("振幅", f"{amp:.2f}%")
     m5.metric("主力動向", main_force)
+    
     v1, v2, v3, v4, v5 = st.columns(5)
     v1.metric("今日成交量", f"{int(vol/1000):,} 張")
     v2.metric("昨日成交量", f"{int(vol_yest/1000):,} 張", f"{int((vol-vol_yest)/1000)} 張")
@@ -41,39 +43,49 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     v4.metric("量能狀態", vol_status)
     v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 5. 自選股/掃描 詳細診斷卡 ---
+# --- 5. 自選股詳細診斷卡 (超級詳細版) ---
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn"):
     status_color = "gray"
-    trend_txt = "資料不足"
-    rsi_txt = "-"
-    vol_txt = "-"
+    trend_txt = "資料讀取中"
+    rsi_info = "N/A"
+    vol_info = "N/A"
     
     if source_type == "yahoo" and len(df) > 20:
         curr = df['Close'].iloc[-1]
+        m5 = df['Close'].rolling(5).mean().iloc[-1]
         m20 = df['Close'].rolling(20).mean().iloc[-1]
         m60 = df['Close'].rolling(60).mean().iloc[-1]
         
+        # 趨勢判定
         if curr > m20 and m20 > m60: 
-            trend_txt = "🔥 多頭排列"
+            trend_txt = "🔥 多頭排列 (強勢)"
             status_color = "green"
         elif curr < m20 and m20 < m60: 
-            trend_txt = "❄️ 空頭排列"
+            trend_txt = "❄️ 空頭排列 (弱勢)"
             status_color = "red"
-        else: 
-            trend_txt = "⚖️ 盤整震盪"
+        elif curr > m20:
+            trend_txt = "📈 短多回穩"
             status_color = "orange"
+        else:
+            trend_txt = "⚖️ 盤整觀望"
+            status_color = "gray"
 
-        delta = df['Close'].diff(); u=delta.copy(); d=delta.copy(); u[u<0]=0; d[d>0]=0
+        # RSI
+        delta = df['Close'].diff()
+        u = delta.copy(); d = delta.copy(); u[u<0]=0; d[d>0]=0
         rs = u.rolling(14).mean()/d.abs().rolling(14).mean()
         rsi = (100 - 100/(1+rs)).iloc[-1]
+        rsi_msg = "過熱" if rsi>80 else ("超賣" if rsi<20 else "正常")
+        rsi_info = f"{rsi:.1f} ({rsi_msg})"
         
+        # 量能
+        vol_curr = df['Volume'].iloc[-1]
         vol_avg = df['Volume'].tail(5).mean()
-        vol_ratio = df['Volume'].iloc[-1] / vol_avg if vol_avg > 0 else 0
-        vol_txt = "🔥 爆量" if vol_ratio > 1.5 else "正常"
-        rsi_txt = f"{rsi:.1f}"
+        vol_ratio = vol_curr / vol_avg if vol_avg > 0 else 0
+        vol_info = f"量增 {vol_ratio:.1f}倍" if vol_ratio > 1.2 else "量縮"
 
     elif source_type == "twse":
-        trend_txt = "即時報價"
+        trend_txt = "TWSE 即時報價"
         status_color = "blue"
 
     with st.container(border=True):
@@ -81,10 +93,9 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
         c1.markdown(f"### {code}")
         c2.write(f"**{name}**")
         c3.metric("現價", f"{price:.2f}")
-        c4.markdown(f":{status_color}[{trend_txt}]")
-        c4.caption(f"RSI: {rsi_txt} | 量: {vol_txt}")
-        # 回傳按鈕狀態，使用 unique key
-        return c5.button("詳細分析", key=f"{key_prefix}_{code}")
+        c4.markdown(f"**{trend_txt}**")
+        c4.caption(f"RSI: {rsi_info} | 量能: {vol_info}")
+        return c5.button("詳細", key=f"{key_prefix}_{code}")
 
 # --- 6. K線圖 ---
 def render_chart(df, title):
@@ -99,20 +110,30 @@ def render_chart(df, title):
     fig.update_layout(height=600, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 7. AI 報告 ---
+# --- 7. AI 深度診斷報告 ---
 def render_ai_report(curr, m20, m60, rsi, bias):
     st.subheader("🤖 AI 深度診斷報告")
     c1, c2, c3 = st.columns(3)
     with c1:
         st.info("📈 **趨勢研判**")
-        if curr > m20 and m20 > m60: st.markdown("### 🔥 強勢多頭"); st.write("站穩月線，均線發散向上。")
-        elif curr < m20 and m20 < m60: st.markdown("### ❄️ 空頭修正"); st.write("跌破月線，上方壓力重。")
-        else: st.markdown("### ⚖️ 盤整震盪"); st.write("均線糾結，方向不明。")
+        if curr > m20 and m20 > m60:
+            st.markdown("### 🔥 強勢多頭")
+            st.write("股價站穩月線之上，且均線發散向上，屬於長線看好的攻擊型態。")
+        elif curr < m20 and m20 < m60:
+            st.markdown("### ❄️ 空頭修正")
+            st.write("股價跌破月線，上方套牢壓力重，建議保守觀望。")
+        else:
+            st.markdown("### ⚖️ 盤整震盪")
+            st.write("均線糾結，方向不明，建議區間操作。")
     with c2:
-        st.warning("⚡ **動能 (RSI)**")
-        st.metric("數值", f"{rsi:.1f}")
-        if rsi > 80: st.write("⚠️ 過熱"); elif rsi < 20: st.write("💎 超賣"); else: st.write("✅ 中性")
+        st.warning("⚡ **動能分析 (RSI)**")
+        st.metric("RSI 數值", f"{rsi:.1f}")
+        if rsi > 80: st.write("⚠️ **過熱警示**：短線買盤過強，隨時可能回檔。")
+        elif rsi < 20: st.write("💎 **超賣訊號**：短線殺過頭，醞釀反彈契機。")
+        else: st.write("✅ **動能中性**：健康輪動。")
     with c3:
-        st.error("📏 **乖離率**")
-        st.metric("數值", f"{bias:.2f}%")
-        if bias > 20: st.write("⚠️ 正乖離大"); elif bias < -20: st.write("💎 負乖離大"); else: st.write("✅ 正常")
+        st.error("📏 **乖離率分析**")
+        st.metric("季線乖離", f"{bias:.2f}%")
+        if bias > 20: st.write("⚠️ **正乖離過大**：股價漲幅偏離基本面，小心拉回。")
+        elif bias < -20: st.write("💎 **負乖離過大**：股價跌深，有機會反彈。")
+        else: st.write("✅ **乖離正常**。")
