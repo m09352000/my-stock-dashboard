@@ -45,23 +45,24 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     v4.metric("量能狀態", vol_status)
     v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 自選股/掃描 詳細診斷卡 (🔥 V39 修復重點：加入 source_type 參數) ---
-def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn"):
+# --- 6. 自選股/掃描 詳細診斷卡 (🔥 V40 新增 rank 參數) ---
+def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None):
     # 預設狀態
     status_color = "gray"
     trend_txt = "等待分析"
     rsi_info = "-"
     vol_info = "-"
     
-    # 邏輯判斷 (只要有資料就跑)
+    # 處理排名顯示
+    display_name = f"#{rank} {name}" if rank else name
+    
+    # 邏輯判斷
     if df is not None and not df.empty:
         try:
-            # 取得最新一筆資料
             if source_type == "yahoo":
                 curr = df['Close'].iloc[-1]
                 vol_curr = df['Volume'].iloc[-1]
                 
-                # 計算均線 (如果有足夠資料)
                 if len(df) > 20:
                     m20 = df['Close'].rolling(20).mean().iloc[-1]
                     m60 = df['Close'].rolling(60).mean().iloc[-1]
@@ -78,7 +79,6 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
                     else:
                         trend_txt = "⚖️ 盤整震盪"
                 
-                # 計算 RSI
                 if len(df) > 15:
                     delta = df['Close'].diff()
                     u = delta.copy(); d = delta.copy(); u[u<0]=0; d[d>0]=0
@@ -87,14 +87,13 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
                     rsi_msg = "過熱" if rsi>80 else "超賣" if rsi<20 else "正常"
                     rsi_info = f"{rsi:.1f} ({rsi_msg})"
                 
-                # 計算量能
                 vol_avg = df['Volume'].tail(5).mean()
                 if vol_avg > 0:
                     v_ratio = vol_curr / vol_avg
                     vol_info = f"爆量 {v_ratio:.1f}倍" if v_ratio > 1.5 else "量縮" if v_ratio < 0.6 else "量平"
             
-            else: # TWSE 只有即時價
-                trend_txt = "即時報價 (無K線)"
+            else: # TWSE
+                trend_txt = "即時報價"
                 status_color = "blue"
                 
         except:
@@ -104,14 +103,10 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
     with st.container(border=True):
         c1, c2, c3, c4, c5 = st.columns([1, 1.5, 2, 2.5, 1])
         c1.markdown(f"### {code}")
-        c2.write(f"**{name}**")
+        c2.markdown(f"**{display_name}**") # 這裡顯示中文名+排名
         c3.metric("現價", f"{price:.2f}")
-        
-        # 詳細診斷顯示區
-        c4.markdown(f"**趨勢**: :{status_color}[{trend_txt}]")
+        c4.markdown(f":{status_color}[{trend_txt}]")
         c4.caption(f"RSI: {rsi_info} | 量能: {vol_info}")
-        
-        # 按鈕
         return c5.button("詳細分析", key=f"{key_prefix}_{code}")
 
 # --- 7. K線圖 ---
