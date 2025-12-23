@@ -20,7 +20,7 @@ except:
     STOCK_TERMS = {}; STRATEGY_DESC = "系統模組載入中..."
 
 # --- 設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V52", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V54", layout="wide")
 
 # --- 初始化 State ---
 defaults = {
@@ -52,91 +52,55 @@ if not st.session_state['scan_pool']:
 def solve_stock_id(val):
     val = str(val).strip()
     if not val: return None, None
-    # 移除常見雜訊
-    clean_val = re.sub(r'[^\w\u4e00-\u9fff]', '', val) # 只留文字數字
-    
-    # 1. 精確匹配
+    clean_val = re.sub(r'[^\w\u4e00-\u9fff]', '', val)
     if clean_val in twstock.codes: return clean_val, twstock.codes[clean_val].name
     for c, d in twstock.codes.items():
         if d.type == "股票" and d.name == clean_val: return c, d.name
-            
-    # 2. 模糊匹配 (針對 OCR 可能多讀少讀字)
-    if len(clean_val) >= 2: # 至少兩個字才做模糊搜尋
+    if len(clean_val) >= 2:
         for c, d in twstock.codes.items():
             if d.type == "股票" and clean_val in d.name: return c, d.name
-            
     return None, None
 
-# --- V52 OCR 診斷核心 ---
-def is_ocr_ready():
-    return shutil.which('tesseract') is not None
-
+# --- OCR 相關 ---
+def is_ocr_ready(): return shutil.which('tesseract') is not None
 def check_language_pack():
-    """檢查是否真的有中文包"""
     try:
         result = subprocess.run(['tesseract', '--list-langs'], capture_output=True, text=True)
-        if 'chi_tra' in result.stdout: return True
-        return False
+        return 'chi_tra' in result.stdout
     except: return False
 
 def process_image_upload(image_file):
     debug_info = {"raw_text": "", "processed_img": None, "error": None}
     try:
-        # 1. 讀取與轉檔
         img = Image.open(image_file)
         if img.mode != 'RGB': img = img.convert('RGB')
-        
-        # 2. 影像增強 (V52: 更溫和的處理，避免誤刪紅字)
-        # 先轉灰階
         gray = img.convert('L')
-        # 反轉顏色 (黑底轉白底)
         inverted = ImageOps.invert(gray)
-        # 增加對比度 (讓字更黑，底更白)
         enhancer = ImageEnhance.Contrast(inverted)
         final_img = enhancer.enhance(2.0)
-        
         debug_info['processed_img'] = final_img
-
-        # 3. 執行辨識
-        # 使用 psm 6 (假設是單一區塊文字)，這對清單截圖很有效
         custom_config = r'--psm 6'
-        
         try:
             text = pytesseract.image_to_string(final_img, lang='chi_tra+eng', config=custom_config)
             debug_info['raw_text'] = text
-        except pytesseract.TesseractError as e:
-            debug_info['error'] = "Tesseract 錯誤 (可能缺中文包)"
-            # 退回英文模式嘗試
+        except:
             text = pytesseract.image_to_string(final_img, lang='eng', config=custom_config)
-            debug_info['raw_text'] = f"(中文包失效，僅英文模式)\n{text}"
+            debug_info['raw_text'] = f"(En Only)\n{text}"
 
-        # 4. 解析文字
         found_stocks = set()
-        
-        # 逐行解析
         lines = text.split('\n')
         for line in lines:
-            # 移除所有空白
             clean_line = line.replace(" ", "").strip()
-            # 嘗試抓出每一行裡可能的股名
-            # 這裡用更寬鬆的邏輯：只要該行包含已知的股票名稱就算中
             if len(clean_line) > 1:
                 sid, sname = solve_stock_id(clean_line)
-                if sid: 
-                    found_stocks.add((sid, sname))
+                if sid: found_stocks.add((sid, sname))
                 else:
-                    # 如果整行沒對中，嘗試切分 (例如 "佳能 79.60" -> "佳能")
-                    # 取前2-3個字試試看
-                    head_2 = clean_line[:2]
-                    head_3 = clean_line[:3]
-                    sid2, sname2 = solve_stock_id(head_2)
+                    sid2, sname2 = solve_stock_id(clean_line[:2])
                     if sid2: found_stocks.add((sid2, sname2))
                     else:
-                        sid3, sname3 = solve_stock_id(head_3)
+                        sid3, sname3 = solve_stock_id(clean_line[:3])
                         if sid3: found_stocks.add((sid3, sname3))
-
         return list(found_stocks), debug_info
-        
     except Exception as e:
         debug_info['error'] = str(e)
         return [], debug_info
@@ -190,7 +154,7 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 52.0 (診斷除錯版)")
+    st.markdown("---"); st.caption("Ver: 54.0 (清單優化版)")
 
 # --- 主畫面 ---
 mode = st.session_state['view_mode']
@@ -198,19 +162,18 @@ mode = st.session_state['view_mode']
 if mode == 'welcome':
     ui.render_header("👋 歡迎來到 AI 股市戰情室")
     st.markdown("""
-    ### 🚀 V52 更新：OCR 診斷模式
-    * **🔍 深度除錯**：如果截圖辨識失敗，系統會顯示「AI 看到的畫面」與「辨識出的原始文字」，幫助您判斷問題。
-    * **🌗 智能對比**：優化了黑底截圖的處理邏輯，不再誤刪紅/綠色文字。
+    ### 🚀 V54 更新：清單管理大進化
+    * **📊 清楚列表**：自選股不再是一堆按鈕，改為詳細的代號+名稱列表。
+    * **⚙️ 批量移除**：支援一次勾選多檔股票刪除，整理清單更輕鬆。
     """)
-    
-    # 環境檢查
+    # 檢查環境
     c1, c2 = st.columns(2)
     with c1:
-        if is_ocr_ready(): st.success("✅ Tesseract 引擎已安裝")
+        if is_ocr_ready(): st.success("✅ Tesseract 引擎就緒")
         else: st.error("❌ Tesseract 引擎未安裝")
     with c2:
-        if check_language_pack(): st.success("✅ 中文語言包 (chi_tra) 已就緒")
-        else: st.error("❌ 中文語言包未偵測到")
+        if check_language_pack(): st.success("✅ 中文語言包就緒")
+        else: st.warning("⚠️ 中文包未安裝 (可能影響辨識)")
 
 elif mode == 'login':
     ui.render_header("🔐 會員中心")
@@ -236,6 +199,8 @@ elif mode == 'watch':
     if not uid: st.warning("請先登入"); ui.render_back_button(go_back)
     else:
         wl = db.get_watchlist(uid)
+        
+        # --- 新增區域 ---
         c1, c2 = st.columns([3,1])
         add_c = c1.text_input("✍️ 手動輸入", placeholder="代號或名稱")
         if c2.button("加入", use_container_width=True) and add_c: 
@@ -243,61 +208,88 @@ elif mode == 'watch':
             if code: db.update_watchlist(uid, code, "add"); st.toast(f"已加入: {name}", icon="✅"); time.sleep(0.5); st.rerun()
             else: st.error(f"找不到: {add_c}")
 
-        # V52: 診斷模式截圖匯入
-        with st.expander("📸 截圖匯入 (V52 診斷版)", expanded=True):
+        # OCR 區域 (保持縮放功能)
+        with st.expander("📸 截圖匯入", expanded=False):
             if is_ocr_ready():
-                if not check_language_pack():
-                    st.error("⚠️ 警告：系統缺少繁體中文包，辨識能力將受限。")
-                    st.code("sudo apt-get install -y tesseract-ocr-chi-tra", language="bash")
-                
-                uploaded_file = st.file_uploader("選擇圖片", type=['png', 'jpg', 'jpeg'])
-                
+                uploaded_file = st.file_uploader("上傳圖片", type=['png', 'jpg', 'jpeg'])
                 if uploaded_file:
-                    with st.spinner("AI 正在解析影像..."): 
-                        found_list, debug_info = process_image_upload(uploaded_file)
-                    
+                    with st.spinner("解析中..."): found_list, debug_info = process_image_upload(uploaded_file)
                     if found_list:
                         new_stocks = [item for item in found_list if item[0] not in wl]
                         if new_stocks:
-                            st.success(f"🔍 成功辨識 {len(new_stocks)} 檔股票！")
-                            cols = st.columns(4)
-                            for i, (wc, wn) in enumerate(new_stocks): cols[i%4].caption(f"✅ {wc} {wn}")
-                            if st.button("📥 全部加入清單"):
+                            st.success(f"發現 {len(new_stocks)} 檔新股票")
+                            if st.button("📥 全部加入"):
                                 for wc, wn in new_stocks: db.update_watchlist(uid, wc, "add")
                                 st.rerun()
-                        else: st.warning("辨識出的股票都已在您的清單中。")
-                    else:
-                        st.error("❌ 未能辨識出任何有效股票。")
-                    
-                    # 診斷資訊區 (V52 新增)
-                    with st.expander("🛠️ 點我查看 AI 診斷日誌 (Debug Info)", expanded=False):
-                        if debug_info['error']: st.error(f"錯誤訊息: {debug_info['error']}")
-                        c_d1, c_d2 = st.columns(2)
-                        with c_d1:
-                            st.write("📷 **AI 處理後的影像 (AI 看到這張圖)**:")
-                            if debug_info['processed_img']: st.image(debug_info['processed_img'], use_container_width=True)
-                        with c_d2:
-                            st.write("📝 **AI 讀到的原始文字 (Raw Text)**:")
-                            st.text_area("OCR Result", debug_info['raw_text'], height=300)
-            else:
-                st.error("❌ OCR 引擎完全未安裝，請聯絡管理員修復。")
+                        else: st.warning("都在清單中了")
+                    else: st.error("未能辨識有效股票"); st.text_area("除錯資訊", debug_info['raw_text'])
+            else: st.error("❌ OCR 引擎未安裝")
 
         st.divider()
+
+        # --- V54 重點優化：表格化顯示與管理 ---
         if wl:
-            st.write(f"📊 持股清單 ({len(wl)})"); cols = st.columns(8)
-            for i, code in enumerate(wl):
-                if cols[i%8].button(f"❌ {code}", key=f"rm_{code}"): db.update_watchlist(uid, code, "remove"); st.rerun()
+            # 準備數據
+            stock_data = []
+            for code in wl:
+                name = code
+                if code in twstock.codes: name = twstock.codes[code].name
+                stock_data.append({"代號": code, "名稱": name})
+            
+            # 使用兩欄佈局：左邊看清單，右邊做管理
+            c_view, c_manage = st.columns([2, 1])
+            
+            with c_view:
+                st.subheader(f"📊 持股列表 ({len(wl)})")
+                # 使用 DataFrame 顯示，乾淨整齊，支援排序
+                st.dataframe(
+                    pd.DataFrame(stock_data), 
+                    use_container_width=True, 
+                    height=300, 
+                    hide_index=True,
+                    column_config={
+                        "代號": st.column_config.TextColumn("股票代號", width="medium"),
+                        "名稱": st.column_config.TextColumn("股票名稱", width="large"),
+                    }
+                )
+            
+            with c_manage:
+                st.subheader("⚙️ 清單管理")
+                st.caption("需要移除股票嗎？請在下方選擇：")
+                # 使用 multiselect 取代大量按鈕
+                options = [f"{row['代號']} {row['名稱']}" for row in stock_data]
+                remove_list = st.multiselect("選擇移除項目", options, label_visibility="collapsed")
+                
+                if st.button("🗑️ 確認移除選取項目", type="primary", use_container_width=True):
+                    if remove_list:
+                        count = 0
+                        for item in remove_list:
+                            code_to_remove = item.split(" ")[0]
+                            db.update_watchlist(uid, code_to_remove, "remove")
+                            count += 1
+                        st.success(f"已移除 {count} 檔股票")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.warning("請先選擇要移除的股票")
+
             st.divider()
-            if st.button("🚀 啟動診斷", use_container_width=True): st.session_state['watch_active'] = True; st.rerun()
+            
+            # 診斷按鈕
+            if st.button("🚀 啟動 AI 戰略診斷 (V53 極速版)", use_container_width=True): 
+                st.session_state['watch_active'] = True; st.rerun()
+            
             if st.session_state['watch_active']:
-                st.success("診斷完成")
+                st.success("診斷完成！")
                 for i, code in enumerate(wl):
                     full_id, _, d, src = db.get_stock_data(code)
                     n = twstock.codes[code].name if code in twstock.codes else code
                     if d is not None:
                         curr = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
+                        # 呼叫 V53 的瘦身版卡片
                         if ui.render_detailed_card(code, n, curr, d, src, key_prefix="watch"): nav_to('analysis', code, n); st.rerun()
-        else: st.info("無自選股")
+        else: st.info("目前無自選股，請從上方新增。")
+        
         ui.render_back_button(go_back)
 
 elif mode == 'analysis':
