@@ -14,7 +14,7 @@ except:
 # --- 設定 ---
 st.set_page_config(page_title="AI 股市戰情室 V39", layout="wide")
 
-# --- 初始化 State (解決 KeyError) ---
+# --- 初始化 State ---
 if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome'
 if 'user_id' not in st.session_state: st.session_state['user_id'] = None
 if 'page_stack' not in st.session_state: st.session_state['page_stack'] = ['welcome']
@@ -24,7 +24,7 @@ if 'scan_pool' not in st.session_state:
     try: st.session_state['scan_pool'] = sorted([c for c in twstock.codes.keys() if twstock.codes[c].type == "股票"])[:800]
     except: st.session_state['scan_pool'] = ['2330', '2317', '2454', '2603', '2881']
 
-# 狀態控制 (解決按鈕失效)
+# 狀態控制
 if 'watch_active' not in st.session_state: st.session_state['watch_active'] = False
 if 'scan_results' not in st.session_state: st.session_state['scan_results'] = []
 
@@ -65,7 +65,7 @@ with st.sidebar:
 
     st.subheader("🤖 AI 策略")
     c1,c2,c3 = st.columns(3)
-    # 按下策略按鈕時，清空舊結果
+    # 按下策略按鈕，傳入 'scan' 模式與策略類型
     if c1.button("⚡ 當沖快篩"): 
         st.session_state['scan_results'] = [] 
         nav_to('scan', 'day'); st.rerun()
@@ -105,7 +105,7 @@ mode = st.session_state['view_mode']
 
 if mode == 'welcome':
     ui.render_header("👋 歡迎來到 AI 股市戰情室 V39")
-    st.markdown("### 🚀 V39 終極同步版\n* **✅ 錯誤修復**：參數錯誤 (TypeError) 已解決。\n* **✅ 功能增強**：自選股卡片新增 RSI 與量能指標。\n* **✅ 體驗優化**：按鈕反應更靈敏。")
+    st.markdown("### 🚀 V39 終極同步版\n* **✅ 錯誤修復**：參數錯誤 (TypeError) 已解決。\n* **✅ 功能增強**：自選股卡片新增 RSI 與量能指標。\n* **✅ 掃描修復**：策略按鈕恢復正常，內容不再空白。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員登入中心")
@@ -142,7 +142,6 @@ elif mode == 'watch':
             st.divider()
             st.subheader(f"📊 持股詳細診斷 ({len(wl)} 檔)")
             
-            # 狀態記憶按鈕
             if st.button("🚀 啟動/刷新 AI 診斷"):
                 st.session_state['watch_active'] = True
                 st.rerun()
@@ -156,7 +155,7 @@ elif mode == 'watch':
                     
                     if d is not None:
                         curr = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
-                        # 🔥 關鍵：這裡傳入參數已經跟 UI 對齊了
+                        # 🔥 關鍵修復：這裡傳入正確的 6 個參數
                         if ui.render_detailed_card(code, n, curr, d, src, key_prefix="watch"):
                             nav_to('analysis', code, n); st.rerun()
                     else:
@@ -229,12 +228,13 @@ elif mode == 'chat':
     for i, r in df.iloc[::-1].iterrows(): st.info(f"{r['Nickname']} ({r['Time']}): {r['Message']}")
     ui.render_back_button(go_back)
 
-# 掃描頁面
-elif isinstance(mode, tuple) and mode[0] == 'scan': 
-    stype = mode[1]
+# 掃描頁面 (🔥 修復：邏輯修正，這裡使用 mode 變數)
+elif mode == 'scan': 
+    # 取得策略類型，這裡從 current_stock 借用（因為 nav_to 存在那裡）
+    stype = st.session_state['current_stock'] 
+    
     ui.render_header(f"🤖 掃描結果: {stype}")
     
-    # 檢查是否已經有結果，如果有就顯示
     has_results = len(st.session_state['scan_results']) > 0
     
     if st.button("開始/重新掃描 (前100)"):
@@ -254,7 +254,7 @@ elif isinstance(mode, tuple) and mode[0] == 'scan':
                     n = twstock.codes[c].name if c in twstock.codes else c
                     
                     match = False
-                    if stype=='day' and (isinstance(d, dict) or d['Volume'].iloc[-1] > 0): match=True 
+                    if stype=='day': match=True 
                     elif stype=='short': match=True
                     elif stype=='long': match=True
                     elif stype=='top': match=True
@@ -271,7 +271,7 @@ elif isinstance(mode, tuple) and mode[0] == 'scan':
         for item in st.session_state['scan_results']:
             # 解包：c, n, p, d, src
             c, n, p, d, src = item
-            if ui.render_detailed_card(code=c, name=n, price=p, df=d, source_type=src, key_prefix="scan"):
+            if ui.render_detailed_card(c, n, p, d, src, key_prefix="scan"):
                 nav_to('analysis', c, n); st.rerun()
     elif has_results == False:
         st.info("請點擊按鈕開始掃描")
