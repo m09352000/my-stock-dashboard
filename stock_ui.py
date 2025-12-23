@@ -44,13 +44,13 @@ def render_term_card(title, content):
         st.markdown(f"**{title}**")
         st.caption(content)
 
-# --- 4. 公司簡介 (恢復顯示) ---
+# --- 4. 公司簡介 ---
 def render_company_profile(summary):
     if summary and summary != "暫無詳細描述":
         with st.expander("🏢 公司簡介與業務", expanded=False):
             st.write(summary)
 
-# --- 5. 數據儀表板 (🔥 V56: 恢復雙排詳細資訊) ---
+# --- 5. 數據儀表板 (恢復雙排詳細資訊) ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              color_settings):
@@ -60,7 +60,6 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         m1.metric("成交價", f"{curr:.2f}", f"{chg:.2f} ({pct:.2f}%)", delta_color=color_settings['delta'])
         m2.metric("最高價", f"{high:.2f}")
         m3.metric("最低價", f"{low:.2f}")
-        # 補回振幅 (當沖重要指標)
         m4.metric("振幅", f"{amp:.2f}%")
         m5.metric("主力動向", main_force)
         
@@ -74,7 +73,7 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         v4.metric("量能狀態", vol_status)
         v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 詳細診斷卡 (列表用 - 保持 V53 的好讀版面) ---
+# --- 6. 詳細診斷卡 (列表用 - 瘦身版) ---
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None, strategy_info=None):
     chg_color = "black"
     advice_txt = "數據不足"
@@ -95,7 +94,6 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
                 m5 = df['Close'].rolling(5).mean().iloc[-1]
                 m20 = df['Close'].rolling(20).mean().iloc[-1]
                 
-                # 簡單一句話狀態
                 if curr > m5 and m5 > m20: 
                     advice_txt = "🔥 多頭強勢"; advice_color = "red"
                 elif curr < m5 and curr > m20:
@@ -148,11 +146,11 @@ def render_chart(df, title, color_settings):
     fig.update_layout(height=500, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 8. AI 報告 (🔥 V56: 恢復詳細版 + 關鍵價位分頁) ---
+# --- 8. AI 報告 (🔥 V56: 詳細版 + 關鍵價位) ---
 def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low):
     st.subheader("🤖 AI 戰略分析報告")
     
-    # 計算 Pivot
+    # 計算 Pivot (關鍵價位)
     pivot = (high + low + curr) / 3
     r1 = 2 * pivot - low
     s1 = 2 * pivot - high
@@ -161,33 +159,27 @@ def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low):
     t1, t2 = st.tabs(["📊 詳細趨勢診斷", "🎯 關鍵價位試算"])
     
     with t1:
-        # 恢復原本的三欄式佈局，資訊更豐富
         c1, c2, c3 = st.columns(3)
-        
         with c1:
             st.markdown("#### 📈 趨勢研判")
-            if curr > m20 and m20 > m60:
-                st.success("🔥 **多頭排列**：短中長期均線向上，多方控盤，適合順勢操作。")
-            elif curr < m20 and m20 < m60:
-                st.error("❄️ **空頭排列**：均線反壓沉重，建議保守觀望或反彈減碼。")
-            elif curr > m20:
-                st.warning("🌤️ **震盪偏多**：股價站上月線，但需留意前高壓力。")
-            else:
-                st.info("🌧️ **震盪偏空**：股價在月線之下，需等待底部訊號。")
+            if curr > m20 and m20 > m60: st.success("🔥 **多頭排列**：均線向上，多方控盤。")
+            elif curr < m20 and m20 < m60: st.error("❄️ **空頭排列**：均線反壓，建議保守。")
+            elif curr > m20: st.warning("🌤️ **震盪偏多**：站上月線，留意前高。")
+            else: st.info("🌧️ **震盪偏空**：月線之下，等待底部。")
                 
         with c2:
             st.markdown("#### ⚡ 動能指標 (RSI)")
             st.metric("RSI (14)", f"{rsi:.1f}")
             if rsi > 80: st.write("⚠️ **過熱警戒**：短線有回檔風險。")
-            elif rsi < 20: st.write("💎 **超賣區**：隨時可能出現技術性反彈。")
-            else: st.write("✅ **動能中性**：無明顯過熱或超賣訊號。")
+            elif rsi < 20: st.write("💎 **超賣區**：隨時可能反彈。")
+            else: st.write("✅ **動能中性**：無明顯過熱訊號。")
             
         with c3:
             st.markdown("#### 📏 乖離率分析")
             st.metric("季線乖離", f"{bias:.2f}%")
-            if bias > 20: st.write("⚠️ **正乖離過大**：股價衝太快，容易拉回。")
-            elif bias < -20: st.write("💎 **負乖離過大**：超跌，有機會反彈。")
-            else: st.write("✅ **乖離正常**：股價沿著趨勢線運行。")
+            if bias > 20: st.write("⚠️ **正乖離過大**：容易拉回。")
+            elif bias < -20: st.write("💎 **負乖離過大**：有機會反彈。")
+            else: st.write("✅ **乖離正常**：沿趨勢線運行。")
 
     with t2:
         st.markdown("Based on Pivot Point Calculation (僅供參考)")
