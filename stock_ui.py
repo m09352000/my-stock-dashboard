@@ -45,7 +45,7 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     v4.metric("量能狀態", vol_status)
     v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 自選股/掃描 詳細診斷卡 (🔥 V39 修復重點) ---
+# --- 6. 自選股/掃描 詳細診斷卡 (🔥 V39 修復重點：加入 source_type 參數) ---
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn"):
     # 預設狀態
     status_color = "gray"
@@ -140,7 +140,7 @@ def render_ai_report(curr, m20, m60, rsi, bias):
         st.warning("⚡ **動能 (RSI)**")
         st.metric("數值", f"{rsi:.1f}")
         if rsi > 80: st.write("⚠️ **過熱警示**：短線買盤過強，隨時回檔。")
-        elif rsi < 20: st.write("💎 **超賣訊號**：短線殺過頭，醞釀反彈。")
+        elif rsi < 20: st.write("💎 **超賣訊號**：短線殺過頭，醞釀反彈契機。")
         else: st.write("✅ **動能中性**：健康輪動。")
     with c3:
         st.error("📏 **乖離率**")
