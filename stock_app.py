@@ -12,7 +12,7 @@ except:
     STOCK_TERMS = {}; STRATEGY_DESC = "請建立 knowledge.py"
 
 # --- 設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V31", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V32", layout="wide")
 
 # --- 初始化 State ---
 if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome'
@@ -39,7 +39,16 @@ def go_back():
         st.session_state['view_mode'] = st.session_state['page_stack'][-1]
         st.rerun()
 
-# --- 側邊欄 ---
+# 搜尋 (修復版)
+def handle_search_form():
+    raw = st.session_state.sidebar_search_input
+    if raw:
+        n = "美股"
+        if raw in twstock.codes: n = twstock.codes[raw].name
+        elif raw.isdigit(): n = "台股"
+        nav_to('analysis', raw, n)
+
+# --- 側邊欄 (文字復原) ---
 with st.sidebar:
     st.title("🎮 戰情控制台")
     uid = st.session_state['user_id']
@@ -48,28 +57,27 @@ with st.sidebar:
     st.divider()
     
     with st.form("search"):
-        q = st.text_input("🔍 輸入代號 (Enter)")
-        if st.form_submit_button("搜尋") and q:
-            n = twstock.codes[q].name if q in twstock.codes else "台股"
-            nav_to('analysis', q, n); st.rerun()
+        q = st.text_input("🔍 輸入代號 (Enter)", key="sidebar_search_input")
+        if st.form_submit_button("開始搜尋"): handle_search_form()
 
     st.subheader("🤖 AI 策略")
     c1,c2,c3 = st.columns(3)
-    if c1.button("當沖"): nav_to('scan', 'day'); st.rerun()
-    if c2.button("短線"): nav_to('scan', 'short'); st.rerun()
-    if c3.button("長線"): nav_to('scan', 'long'); st.rerun()
-    if st.button("📈 漲幅前 100"): nav_to('scan', 'top'); st.rerun()
+    if c1.button("⚡ 當沖快篩"): nav_to('scan', 'day'); st.rerun()
+    if c2.button("📈 短線波段"): nav_to('scan', 'short'); st.rerun()
+    if c3.button("🐢 長線存股"): nav_to('scan', 'long'); st.rerun()
+    if st.button("🏆 漲幅前 100"): nav_to('scan', 'top'); st.rerun()
+    if st.button("🔄 更新精選池"): db.update_top_100()
     
     st.divider()
-    if st.button("📖 新手村"): nav_to('learn'); st.rerun()
-    if st.button("🔒 自選股"): nav_to('watch'); st.rerun()
-    if st.button("💬 留言板"): nav_to('chat'); st.rerun()
+    if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
+    if st.button("🔒 個人自選股"): nav_to('watch'); st.rerun()
+    if st.button("💬 戰友留言板"): nav_to('chat'); st.rerun()
     
     st.divider()
     if not uid:
         if st.button("🔐 登入 / 註冊"): nav_to('login'); st.rerun()
     else:
-        if st.button("🚪 登出"): st.session_state['user_id']=None; nav_to('welcome'); st.rerun()
+        if st.button("🚪 登出系統"): st.session_state['user_id']=None; nav_to('welcome'); st.rerun()
     
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
 
@@ -77,8 +85,8 @@ with st.sidebar:
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V31")
-    st.markdown("### 🚀 系統特色\n* **🔒 自選股獨立存檔**：資料絕對安全。\n* **📊 專業詳細診斷**：修復介面，詳細數據回歸。\n* **🛡️ 雙引擎數據**：Yahoo + 證交所雙重保險。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V32")
+    st.markdown("### 🚀 系統特色\n* **🔒 自選股獨立存檔**：資料絕對安全。\n* **📊 專業詳細診斷**：拒絕簡化，給您最完整的數據。\n* **🛡️ 雙引擎數據**：Yahoo + 證交所雙重保險。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員登入中心")
@@ -107,7 +115,7 @@ elif mode == 'watch':
         if c2.button("加入") and add_c: db.update_watchlist(uid, add_c, "add"); st.rerun()
         
         if wl:
-            st.write("管理：")
+            st.write("管理清單：")
             cols = st.columns(8)
             for i, code in enumerate(wl):
                 if cols[i%8].button(f"❌ {code}"): db.update_watchlist(uid, code, "remove"); st.rerun()
@@ -122,7 +130,6 @@ elif mode == 'watch':
                     n = twstock.codes[code].name if code in twstock.codes else code
                     if d is not None:
                         curr = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
-                        # 呼叫詳細診斷卡
                         if ui.render_detailed_card(code, n, curr, d, src):
                             nav_to('analysis', code, n); st.rerun()
                     else: st.error(f"{code} 資料讀取失敗")
@@ -142,7 +149,7 @@ elif mode == 'analysis':
     if src == "fail":
         st.error("查無資料")
     elif src == "yahoo":
-        # 1. 計算所有詳細數據 (確保變數齊全)
+        # 1. 數據
         info = stock.info
         curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]
         chg = curr - prev; pct = (chg/prev)*100
@@ -155,16 +162,12 @@ elif mode == 'analysis':
         fh = info.get('heldPercentInstitutions', 0)*100
         color_settings = db.get_color_settings(code)
 
-        # 2. 顯示公司簡介 (現在 stock_ui 有這個函數了，不會報錯)
+        # 2. 介面
         ui.render_company_profile(db.translate_text(info.get('longBusinessSummary','')))
-        
-        # 3. 呼叫 UI 顯示數據儀表板 (滿滿的細節)
         ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vt, vy, va, vs, fh, color_settings)
-        
-        # 4. 顯示圖表
         ui.render_chart(df, f"{name} K線圖")
         
-        # 5. 計算 AI 指標並顯示報告
+        # 3. 診斷
         m20 = df['Close'].rolling(20).mean().iloc[-1]
         m60 = df['Close'].rolling(60).mean().iloc[-1]
         delta = df['Close'].diff(); u=delta.copy(); d=delta.copy(); u[u<0]=0; d[d>0]=0
@@ -173,10 +176,8 @@ elif mode == 'analysis':
         ui.render_ai_report(curr, m20, m60, rsi, bias)
         
     elif src == "twse":
-        st.warning("⚠️ 使用 TWSE 備援數據 (無 K 線)")
-        curr = df['Close']; high = df['High']; low = df['Low']
-        st.metric("成交價", f"{curr}")
-        st.metric("最高", f"{high}"); st.metric("最低", f"{low}")
+        st.warning("⚠️ 使用即時備援數據 (無 K 線)")
+        st.metric("現價", f"{df['Close']}")
         st.metric("成交量", f"{df['Volume']}")
 
     ui.render_back_button(go_back)
@@ -203,7 +204,7 @@ elif mode == 'chat':
     for i, r in df.iloc[::-1].iterrows(): st.info(f"{r['Nickname']} ({r['Time']}): {r['Message']}")
     ui.render_back_button(go_back)
 
-# 掃描頁面
+# 掃描頁面 (修正掃描結果為空的問題)
 elif isinstance(mode, tuple) and mode[0] == 'scan': 
     stype = mode[1]
     ui.render_header(f"🤖 掃描結果: {stype}")
@@ -212,7 +213,7 @@ elif isinstance(mode, tuple) and mode[0] == 'scan':
         res = []
         bar = st.progress(0)
         pool = st.session_state['scan_pool']
-        limit = 300
+        limit = 200 # 限制掃描數量以免超時
         
         for i, c in enumerate(pool):
             if i>=limit: break
@@ -222,15 +223,22 @@ elif isinstance(mode, tuple) and mode[0] == 'scan':
                 if d is not None and isinstance(d, pd.DataFrame) and len(d)>30:
                     p = d['Close'].iloc[-1]
                     n = twstock.codes[c].name if c in twstock.codes else c
-                    if stype=='day' and d['Volume'].iloc[-1] > d['Volume'].mean()*1.5: res.append((c, n, p))
-                    elif stype=='short' and p > d['Close'].rolling(20).mean().iloc[-1]: res.append((c, n, p))
-                    elif stype=='long' and p > d['Close'].rolling(60).mean().iloc[-1]: res.append((c, n, p))
-                    elif stype=='top': res.append((c, n, p))
+                    # 邏輯判斷
+                    match = False
+                    if stype=='day' and d['Volume'].iloc[-1] > d['Volume'].mean()*1.2: match=True
+                    elif stype=='short' and p > d['Close'].rolling(20).mean().iloc[-1]: match=True
+                    elif stype=='long' and p > d['Close'].rolling(60).mean().iloc[-1]: match=True
+                    elif stype=='top': match=True
+                    
+                    if match: res.append((c, n, p))
             except: pass
         bar.empty()
         
-        for c, n, p in res[:100]:
-            if ui.render_detailed_card(c, n, p, None, "twse"):
-                nav_to('analysis', c, n); st.rerun()
+        if res:
+            for c, n, p in res[:100]:
+                if ui.render_detailed_card(c, n, p, None, "twse"):
+                    nav_to('analysis', c, n); st.rerun()
+        else:
+            st.warning("目前無符合條件標的")
                 
     ui.render_back_button(go_back)
