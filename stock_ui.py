@@ -2,7 +2,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# --- 1. 頁面標題與監控按鈕 ---
+# --- 1. 標題與監控 ---
 def render_header(title, show_monitor=False):
     c1, c2 = st.columns([3, 1])
     c1.title(title)
@@ -12,20 +12,20 @@ def render_header(title, show_monitor=False):
     st.divider()
     return is_live
 
-# --- 2. 底部返回按鈕 ---
+# --- 2. 底部返回 ---
 def render_back_button(callback_func):
     st.divider()
     if st.button("⬅️ 返回上一頁", use_container_width=True):
         callback_func()
 
-# --- 3. 新手村美化卡片 (修復醜醜排版) ---
+# --- 3. 新手村卡片 ---
 def render_term_card(title, content):
     st.info(f"### {title}\n\n{content}")
 
 # --- 4. 公司簡介 ---
 def render_company_profile(summary):
     if summary and summary != "暫無詳細描述":
-        with st.expander("🏢 公司簡介 (點擊展開)", expanded=False):
+        with st.expander("🏢 公司簡介", expanded=False):
             st.write(summary)
 
 # --- 5. 詳細數據儀表板 ---
@@ -45,39 +45,42 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     v4.metric("量能狀態", vol_status)
     v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 自選股詳細診斷卡 ---
-def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn"):
+# --- 6. 自選股/掃描 詳細診斷卡 (純 Yahoo 版) ---
+def render_detailed_card(code, name, price, df, key_prefix="btn"):
+    # 預設值
     status_color = "gray"
-    trend_txt = "資料不足"
+    trend_txt = "資料讀取中"
     rsi_txt = "-"
     vol_txt = "-"
     
-    if source_type == "yahoo" and len(df) > 20:
+    # 只要有資料就計算 (寬鬆模式)
+    if df is not None and not df.empty and len(df) > 5:
         curr = df['Close'].iloc[-1]
-        m20 = df['Close'].rolling(20).mean().iloc[-1]
-        m60 = df['Close'].rolling(60).mean().iloc[-1]
+        # 簡單計算均線
+        m20 = df['Close'].rolling(20).mean().iloc[-1] if len(df) > 20 else curr
         
-        if curr > m20 and m20 > m60: 
-            trend_txt = "🔥 多頭排列"
+        # 趨勢
+        if curr > m20:
+            trend_txt = "🔥 多頭格局"
             status_color = "green"
-        elif curr < m20 and m20 < m60: 
-            trend_txt = "❄️ 空頭排列"
+        else:
+            trend_txt = "❄️ 空頭整理"
             status_color = "red"
-        else: 
-            trend_txt = "⚖️ 盤整震盪"
-            status_color = "orange"
 
-        delta = df['Close'].diff(); u=delta.copy(); d=delta.copy(); u[u<0]=0; d[d>0]=0
-        rs = u.rolling(14).mean()/d.abs().rolling(14).mean()
-        rsi = (100 - 100/(1+rs)).iloc[-1]
+        # RSI (如果有足夠資料)
+        if len(df) > 15:
+            delta = df['Close'].diff()
+            u = delta.copy(); d = delta.copy(); u[u<0]=0; d[d>0]=0
+            rs = u.rolling(14).mean()/d.abs().rolling(14).mean()
+            rsi = (100 - 100/(1+rs)).iloc[-1]
+            rsi_txt = f"{rsi:.1f}"
+        
+        # 量能
+        vol_curr = df['Volume'].iloc[-1]
         vol_avg = df['Volume'].tail(5).mean()
-        vol_ratio = df['Volume'].iloc[-1] / vol_avg if vol_avg > 0 else 0
-        vol_txt = "🔥 爆量" if vol_ratio > 1.5 else "正常"
-        rsi_txt = f"{rsi:.1f}"
-
-    elif source_type == "twse":
-        trend_txt = "即時報價"
-        status_color = "blue"
+        if vol_avg > 0:
+            ratio = vol_curr / vol_avg
+            vol_txt = "🔥 爆量" if ratio > 1.5 else "量縮" if ratio < 0.6 else "正常"
 
     with st.container(border=True):
         c1, c2, c3, c4, c5 = st.columns([1, 1.5, 2, 2.5, 1])
@@ -86,6 +89,7 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
         c3.metric("現價", f"{price:.2f}")
         c4.markdown(f":{status_color}[{trend_txt}]")
         c4.caption(f"RSI: {rsi_txt} | 量: {vol_txt}")
+        # 回傳按鈕
         return c5.button("詳細分析", key=f"{key_prefix}_{code}")
 
 # --- 7. K線圖 ---
@@ -101,15 +105,14 @@ def render_chart(df, title):
     fig.update_layout(height=600, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 8. AI 報告 (🔥 修復 SyntaxError) ---
+# --- 8. AI 報告 ---
 def render_ai_report(curr, m20, m60, rsi, bias):
     st.subheader("🤖 AI 深度診斷報告")
     c1, c2, c3 = st.columns(3)
     with c1:
         st.info("📈 **趨勢研判**")
-        if curr > m20 and m20 > m60: st.markdown("### 🔥 強勢多頭"); st.write("站穩月線，均線發散向上。")
-        elif curr < m20 and m20 < m60: st.markdown("### ❄️ 空頭修正"); st.write("跌破月線，上方壓力重。")
-        else: st.markdown("### ⚖️ 盤整震盪"); st.write("均線糾結，方向不明。")
+        if curr > m20: st.markdown("### 🔥 強勢多頭"); st.write("股價位於月線之上，趨勢偏多。")
+        else: st.markdown("### ❄️ 弱勢整理"); st.write("股價跌破月線，建議觀望。")
     with c2:
         st.warning("⚡ **動能 (RSI)**")
         st.metric("數值", f"{rsi:.1f}")
