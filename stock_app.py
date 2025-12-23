@@ -12,7 +12,7 @@ except:
     STOCK_TERMS = {}; STRATEGY_DESC = "請建立 knowledge.py"
 
 # --- 設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V39", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V40", layout="wide")
 
 # --- 初始化 State ---
 if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome'
@@ -22,7 +22,7 @@ if 'current_stock' not in st.session_state: st.session_state['current_stock'] = 
 if 'current_name' not in st.session_state: st.session_state['current_name'] = ""
 if 'scan_pool' not in st.session_state:
     try: st.session_state['scan_pool'] = sorted([c for c in twstock.codes.keys() if twstock.codes[c].type == "股票"])[:800]
-    except: st.session_state['scan_pool'] = ['2330', '2317', '2454', '2603', '2881']
+    except: st.session_state['scan_pool'] = ['2330', '2317', '2454', '2603', '2881', '2891', '2002', '1301', '2412']
 
 # 狀態控制
 if 'watch_active' not in st.session_state: st.session_state['watch_active'] = False
@@ -65,7 +65,7 @@ with st.sidebar:
 
     st.subheader("🤖 AI 策略")
     c1,c2,c3 = st.columns(3)
-    # 按下策略按鈕，傳入 'scan' 模式與策略類型
+    # 按下策略按鈕 -> 進入 scan 模式，並把策略類型存在 current_stock
     if c1.button("⚡ 當沖快篩"): 
         st.session_state['scan_results'] = [] 
         nav_to('scan', 'day'); st.rerun()
@@ -104,8 +104,8 @@ with st.sidebar:
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V39")
-    st.markdown("### 🚀 V39 終極同步版\n* **✅ 錯誤修復**：參數錯誤 (TypeError) 已解決。\n* **✅ 功能增強**：自選股卡片新增 RSI 與量能指標。\n* **✅ 掃描修復**：策略按鈕恢復正常，內容不再空白。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V40")
+    st.markdown("### 🚀 V40 終極修復版\n* **✅ 頁面修復**：策略掃描按鈕點擊後保證顯示頁面。\n* **🏆 排名功能**：掃描結果新增 #1, #2 排名顯示。\n* **🇹🇼 中文優化**：股票名稱強制顯示中文。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員登入中心")
@@ -155,7 +155,6 @@ elif mode == 'watch':
                     
                     if d is not None:
                         curr = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
-                        # 🔥 關鍵修復：這裡傳入正確的 6 個參數
                         if ui.render_detailed_card(code, n, curr, d, src, key_prefix="watch"):
                             nav_to('analysis', code, n); st.rerun()
                     else:
@@ -228,12 +227,13 @@ elif mode == 'chat':
     for i, r in df.iloc[::-1].iterrows(): st.info(f"{r['Nickname']} ({r['Time']}): {r['Message']}")
     ui.render_back_button(go_back)
 
-# 掃描頁面 (🔥 修復：邏輯修正，這裡使用 mode 變數)
+# 掃描頁面 (🔥 修復：使用 mode == 'scan'，不再使用 isinstance)
 elif mode == 'scan': 
-    # 取得策略類型，這裡從 current_stock 借用（因為 nav_to 存在那裡）
-    stype = st.session_state['current_stock'] 
+    # 策略類型存在 current_stock 裡 (從 nav_to 傳來的)
+    stype = st.session_state['current_stock']
+    title_map = {'day': '當沖快篩', 'short': '短線波段', 'long': '長線存股', 'top': '漲幅前 100'}
     
-    ui.render_header(f"🤖 掃描結果: {stype}")
+    ui.render_header(f"🤖 掃描結果: {title_map.get(stype, stype)}")
     
     has_results = len(st.session_state['scan_results']) > 0
     
@@ -251,10 +251,11 @@ elif mode == 'scan':
                 fid, _, d, src = db.get_stock_data(c)
                 if d is not None:
                     p = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
+                    # 強制使用中文名稱
                     n = twstock.codes[c].name if c in twstock.codes else c
                     
                     match = False
-                    if stype=='day': match=True 
+                    if stype=='day' and (isinstance(d, dict) or d['Volume'].iloc[-1] > 0): match=True 
                     elif stype=='short': match=True
                     elif stype=='long': match=True
                     elif stype=='top': match=True
@@ -266,12 +267,13 @@ elif mode == 'scan':
         st.session_state['scan_results'] = res
         st.rerun() 
 
-    # 顯示結果
+    # 顯示結果 (🔥 這裡加上了排名 i+1)
     if st.session_state['scan_results']:
-        for item in st.session_state['scan_results']:
+        for i, item in enumerate(st.session_state['scan_results']):
             # 解包：c, n, p, d, src
             c, n, p, d, src = item
-            if ui.render_detailed_card(c, n, p, d, src, key_prefix="scan"):
+            # 傳入 rank=i+1 顯示排名
+            if ui.render_detailed_card(c, n, p, d, src, key_prefix="scan", rank=i+1):
                 nav_to('analysis', c, n); st.rerun()
     elif has_results == False:
         st.info("請點擊按鈕開始掃描")
