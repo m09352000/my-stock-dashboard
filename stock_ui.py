@@ -101,7 +101,7 @@ def render_chart(df, title):
     fig.update_layout(height=600, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 8. AI 報告 ---
+# --- 8. AI 報告 (🔥 修復 SyntaxError) ---
 def render_ai_report(curr, m20, m60, rsi, bias):
     st.subheader("🤖 AI 深度診斷報告")
     c1, c2, c3 = st.columns(3)
@@ -113,8 +113,12 @@ def render_ai_report(curr, m20, m60, rsi, bias):
     with c2:
         st.warning("⚡ **動能 (RSI)**")
         st.metric("數值", f"{rsi:.1f}")
-        if rsi > 80: st.write("⚠️ 過熱"); elif rsi < 20: st.write("💎 超賣"); else: st.write("✅ 中性")
+        if rsi > 80: st.write("⚠️ 過熱")
+        elif rsi < 20: st.write("💎 超賣")
+        else: st.write("✅ 中性")
     with c3:
         st.error("📏 **乖離率**")
         st.metric("數值", f"{bias:.2f}%")
-        if bias > 20: st.write("⚠️ 正乖離大"); elif bias < -20: st.write("💎 負乖離大"); else: st.write("✅ 正常")
+        if bias > 20: st.write("⚠️ 正乖離大")
+        elif bias < -20: st.write("💎 負乖離大")
+        else: st.write("✅ 正常")
