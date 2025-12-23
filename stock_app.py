@@ -12,7 +12,7 @@ except:
     STOCK_TERMS = {}; STRATEGY_DESC = "請建立 knowledge.py"
 
 # --- 設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V30", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V31", layout="wide")
 
 # --- 初始化 State ---
 if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome'
@@ -77,11 +77,11 @@ with st.sidebar:
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V30")
-    st.markdown("### 🚀 系統特色\n* **🔒 資料安全**：自選股與歷史紀錄獨立存檔。\n* **📊 專業診斷**：恢復詳細數據儀表板，不再簡化。\n* **🛡️ 雙引擎數據**：Yahoo + 證交所雙重保險。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V31")
+    st.markdown("### 🚀 系統特色\n* **🔒 自選股獨立存檔**：資料絕對安全。\n* **📊 專業詳細診斷**：修復介面，詳細數據回歸。\n* **🛡️ 雙引擎數據**：Yahoo + 證交所雙重保險。")
 
 elif mode == 'login':
-    ui.render_header("🔐 會員登入中心")
+    ui.render_header("🔐 會員登入")
     t1, t2 = st.tabs(["登入", "註冊"])
     with t1:
         u = st.text_input("帳號"); p = st.text_input("密碼", type="password")
@@ -107,7 +107,7 @@ elif mode == 'watch':
         if c2.button("加入") and add_c: db.update_watchlist(uid, add_c, "add"); st.rerun()
         
         if wl:
-            st.write("管理清單：")
+            st.write("管理：")
             cols = st.columns(8)
             for i, code in enumerate(wl):
                 if cols[i%8].button(f"❌ {code}"): db.update_watchlist(uid, code, "remove"); st.rerun()
@@ -122,6 +122,7 @@ elif mode == 'watch':
                     n = twstock.codes[code].name if code in twstock.codes else code
                     if d is not None:
                         curr = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
+                        # 呼叫詳細診斷卡
                         if ui.render_detailed_card(code, n, curr, d, src):
                             nav_to('analysis', code, n); st.rerun()
                     else: st.error(f"{code} 資料讀取失敗")
@@ -133,7 +134,6 @@ elif mode == 'analysis':
     code = st.session_state['current_stock']
     name = st.session_state['current_name']
     
-    # 這裡只顯示標題與監控開關 (沒有上面的返回按鈕了)
     is_live = ui.render_header(f"{name} {code}", show_monitor=True)
     if is_live: time.sleep(3); st.rerun()
     
@@ -142,7 +142,7 @@ elif mode == 'analysis':
     if src == "fail":
         st.error("查無資料")
     elif src == "yahoo":
-        # 1. 計算所有詳細數據 (恢復 V28 的計算邏輯)
+        # 1. 計算所有詳細數據 (確保變數齊全)
         info = stock.info
         curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]
         chg = curr - prev; pct = (chg/prev)*100
@@ -153,12 +153,13 @@ elif mode == 'analysis':
         vol_r = vt/va if va>0 else 1
         vs = "🔥 爆量" if vol_r>1.5 else ("💤 量縮" if vol_r<0.6 else "正常")
         fh = info.get('heldPercentInstitutions', 0)*100
-        
-        # 2. 顯示公司簡介
+        color_settings = db.get_color_settings(code)
+
+        # 2. 顯示公司簡介 (現在 stock_ui 有這個函數了，不會報錯)
         ui.render_company_profile(db.translate_text(info.get('longBusinessSummary','')))
         
-        # 3. 呼叫 UI 顯示數據儀表板 (重點回歸！)
-        ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vt, vy, va, vs, fh, db.get_color_settings(code))
+        # 3. 呼叫 UI 顯示數據儀表板 (滿滿的細節)
+        ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vt, vy, va, vs, fh, color_settings)
         
         # 4. 顯示圖表
         ui.render_chart(df, f"{name} K線圖")
@@ -172,8 +173,10 @@ elif mode == 'analysis':
         ui.render_ai_report(curr, m20, m60, rsi, bias)
         
     elif src == "twse":
-        st.warning("⚠️ 使用即時備援數據 (無 K 線)")
-        st.metric("現價", f"{df['Close']}")
+        st.warning("⚠️ 使用 TWSE 備援數據 (無 K 線)")
+        curr = df['Close']; high = df['High']; low = df['Low']
+        st.metric("成交價", f"{curr}")
+        st.metric("最高", f"{high}"); st.metric("最低", f"{low}")
         st.metric("成交量", f"{df['Volume']}")
 
     ui.render_back_button(go_back)
@@ -202,7 +205,7 @@ elif mode == 'chat':
 
 # 掃描頁面
 elif isinstance(mode, tuple) and mode[0] == 'scan': 
-    stype = mode[1] # 'day', 'short', 'long', 'top'
+    stype = mode[1]
     ui.render_header(f"🤖 掃描結果: {stype}")
     
     if st.button("開始掃描 (前100)"):
@@ -219,7 +222,6 @@ elif isinstance(mode, tuple) and mode[0] == 'scan':
                 if d is not None and isinstance(d, pd.DataFrame) and len(d)>30:
                     p = d['Close'].iloc[-1]
                     n = twstock.codes[c].name if c in twstock.codes else c
-                    # 簡單範例邏輯
                     if stype=='day' and d['Volume'].iloc[-1] > d['Volume'].mean()*1.5: res.append((c, n, p))
                     elif stype=='short' and p > d['Close'].rolling(20).mean().iloc[-1]: res.append((c, n, p))
                     elif stype=='long' and p > d['Close'].rolling(60).mean().iloc[-1]: res.append((c, n, p))
@@ -227,9 +229,8 @@ elif isinstance(mode, tuple) and mode[0] == 'scan':
             except: pass
         bar.empty()
         
-        # 顯示結果
         for c, n, p in res[:100]:
-            if ui.render_detailed_card(c, n, p, None, "twse"): # 列表用簡化顯示(為效能)
+            if ui.render_detailed_card(c, n, p, None, "twse"):
                 nav_to('analysis', c, n); st.rerun()
                 
     ui.render_back_button(go_back)
