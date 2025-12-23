@@ -6,12 +6,9 @@ import re
 import shutil
 import subprocess
 import os
-
-# 影像處理
 from PIL import Image, ImageOps, ImageEnhance
 import pytesseract
 
-# 引入模組
 import stock_db as db
 import stock_ui as ui
 try:
@@ -19,26 +16,16 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "系統模組載入中..."
 
-# --- 設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V54", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V57", layout="wide")
 
-# --- 初始化 State ---
 defaults = {
-    'view_mode': 'welcome',
-    'user_id': None,
-    'page_stack': ['welcome'],
-    'current_stock': "",
-    'current_name': "",
-    'scan_pool': [],          
-    'filtered_pool': [],      
-    'scan_target_group': "全部", 
-    'watch_active': False,
-    'scan_results': []
+    'view_mode': 'welcome', 'user_id': None, 'page_stack': ['welcome'],
+    'current_stock': "", 'current_name': "", 'scan_pool': [], 'filtered_pool': [],      
+    'scan_target_group': "全部", 'watch_active': False, 'scan_results': []
 }
 for k, v in defaults.items():
     if k not in st.session_state: st.session_state[k] = v
 
-# 初始化掃描池
 if not st.session_state['scan_pool']:
     try:
         all_codes = [c for c in twstock.codes.values() if c.type == "股票"]
@@ -48,7 +35,6 @@ if not st.session_state['scan_pool']:
     except:
         st.session_state['scan_pool'] = ['2330', '2317']; st.session_state['all_groups'] = ["全部"]
 
-# --- 核心邏輯 ---
 def solve_stock_id(val):
     val = str(val).strip()
     if not val: return None, None
@@ -61,7 +47,6 @@ def solve_stock_id(val):
             if d.type == "股票" and clean_val in d.name: return c, d.name
     return None, None
 
-# --- OCR 相關 ---
 def is_ocr_ready(): return shutil.which('tesseract') is not None
 def check_language_pack():
     try:
@@ -105,7 +90,6 @@ def process_image_upload(image_file):
         debug_info['error'] = str(e)
         return [], debug_info
 
-# --- 導航 ---
 def nav_to(mode, code=None, name=None):
     if code:
         st.session_state['current_stock'] = code
@@ -126,7 +110,6 @@ def handle_search():
         if code: nav_to('analysis', code, name); st.session_state.search_input_val = ""
         else: st.toast(f"找不到 '{raw}'", icon="⚠️")
 
-# --- Sidebar ---
 with st.sidebar:
     st.title("🎮 戰情控制台")
     uid = st.session_state['user_id']
@@ -154,26 +137,20 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 54.0 (清單優化版)")
+    st.markdown("---"); st.caption("Ver: 57.0 (強制修復版)")
 
-# --- 主畫面 ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
     ui.render_header("👋 歡迎來到 AI 股市戰情室")
-    st.markdown("""
-    ### 🚀 V54 更新：清單管理大進化
-    * **📊 清楚列表**：自選股不再是一堆按鈕，改為詳細的代號+名稱列表。
-    * **⚙️ 批量移除**：支援一次勾選多檔股票刪除，整理清單更輕鬆。
-    """)
-    # 檢查環境
+    st.markdown("### 🚀 V57 更新：強制修復遺失功能\n* **✅ 關鍵價位回歸**：AI 報告頁面強制啟用「關鍵價位」分頁。\n* **✅ 數據儀表板**：補回成交量與振幅詳細資訊。\n* **✅ 檔案同步**：確保 UI 與 App 版本一致。")
     c1, c2 = st.columns(2)
     with c1:
         if is_ocr_ready(): st.success("✅ Tesseract 引擎就緒")
         else: st.error("❌ Tesseract 引擎未安裝")
     with c2:
         if check_language_pack(): st.success("✅ 中文語言包就緒")
-        else: st.warning("⚠️ 中文包未安裝 (可能影響辨識)")
+        else: st.warning("⚠️ 中文包未安裝")
 
 elif mode == 'login':
     ui.render_header("🔐 會員中心")
@@ -199,8 +176,6 @@ elif mode == 'watch':
     if not uid: st.warning("請先登入"); ui.render_back_button(go_back)
     else:
         wl = db.get_watchlist(uid)
-        
-        # --- 新增區域 ---
         c1, c2 = st.columns([3,1])
         add_c = c1.text_input("✍️ 手動輸入", placeholder="代號或名稱")
         if c2.button("加入", use_container_width=True) and add_c: 
@@ -208,7 +183,6 @@ elif mode == 'watch':
             if code: db.update_watchlist(uid, code, "add"); st.toast(f"已加入: {name}", icon="✅"); time.sleep(0.5); st.rerun()
             else: st.error(f"找不到: {add_c}")
 
-        # OCR 區域 (保持縮放功能)
         with st.expander("📸 截圖匯入", expanded=False):
             if is_ocr_ready():
                 uploaded_file = st.file_uploader("上傳圖片", type=['png', 'jpg', 'jpeg'])
@@ -227,56 +201,31 @@ elif mode == 'watch':
 
         st.divider()
 
-        # --- V54 重點優化：表格化顯示與管理 ---
         if wl:
-            # 準備數據
             stock_data = []
             for code in wl:
                 name = code
                 if code in twstock.codes: name = twstock.codes[code].name
                 stock_data.append({"代號": code, "名稱": name})
             
-            # 使用兩欄佈局：左邊看清單，右邊做管理
             c_view, c_manage = st.columns([2, 1])
-            
             with c_view:
                 st.subheader(f"📊 持股列表 ({len(wl)})")
-                # 使用 DataFrame 顯示，乾淨整齊，支援排序
-                st.dataframe(
-                    pd.DataFrame(stock_data), 
-                    use_container_width=True, 
-                    height=300, 
-                    hide_index=True,
-                    column_config={
-                        "代號": st.column_config.TextColumn("股票代號", width="medium"),
-                        "名稱": st.column_config.TextColumn("股票名稱", width="large"),
-                    }
-                )
+                st.dataframe(pd.DataFrame(stock_data), use_container_width=True, height=300, hide_index=True)
             
             with c_manage:
                 st.subheader("⚙️ 清單管理")
-                st.caption("需要移除股票嗎？請在下方選擇：")
-                # 使用 multiselect 取代大量按鈕
                 options = [f"{row['代號']} {row['名稱']}" for row in stock_data]
                 remove_list = st.multiselect("選擇移除項目", options, label_visibility="collapsed")
-                
-                if st.button("🗑️ 確認移除選取項目", type="primary", use_container_width=True):
+                if st.button("🗑️ 確認移除", type="primary", use_container_width=True):
                     if remove_list:
-                        count = 0
                         for item in remove_list:
                             code_to_remove = item.split(" ")[0]
                             db.update_watchlist(uid, code_to_remove, "remove")
-                            count += 1
-                        st.success(f"已移除 {count} 檔股票")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.warning("請先選擇要移除的股票")
+                        st.success("已移除"); st.rerun()
 
             st.divider()
-            
-            # 診斷按鈕
-            if st.button("🚀 啟動 AI 戰略診斷 (V53 極速版)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 戰略診斷", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
@@ -286,10 +235,8 @@ elif mode == 'watch':
                     n = twstock.codes[code].name if code in twstock.codes else code
                     if d is not None:
                         curr = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
-                        # 呼叫 V53 的瘦身版卡片
                         if ui.render_detailed_card(code, n, curr, d, src, key_prefix="watch"): nav_to('analysis', code, n); st.rerun()
-        else: st.info("目前無自選股，請從上方新增。")
-        
+        else: st.info("目前無自選股")
         ui.render_back_button(go_back)
 
 elif mode == 'analysis':
@@ -316,7 +263,10 @@ elif mode == 'analysis':
         delta = df['Close'].diff(); u = delta.copy(); d = delta.copy(); u[u<0]=0; d[d>0]=0
         rs = u.rolling(14).mean() / d.abs().rolling(14).mean(); rsi = (100 - 100/(1+rs)).iloc[-1]
         bias = ((curr-m60)/m60)*100
+        
+        # 🔥 V57: 傳入 8 個參數，確保 UI 接收到
         ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low)
+        
     elif src == "twse": st.metric("現價", f"{df['Close']}")
     ui.render_back_button(go_back)
 
