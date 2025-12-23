@@ -5,3 +5,4 @@ twstock
 plotly
 deep-translator
 lxml
+ta
