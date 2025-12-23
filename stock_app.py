@@ -7,8 +7,8 @@ import shutil
 import subprocess
 import os
 
-# 影像處理 (新增 ImageOps)
-from PIL import Image, ImageOps
+# 影像處理
+from PIL import Image, ImageOps, ImageEnhance
 import pytesseract
 
 # 引入模組
@@ -20,7 +20,7 @@ except:
     STOCK_TERMS = {}; STRATEGY_DESC = "系統模組載入中..."
 
 # --- 設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V51", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V52", layout="wide")
 
 # --- 初始化 State ---
 defaults = {
@@ -52,89 +52,94 @@ if not st.session_state['scan_pool']:
 def solve_stock_id(val):
     val = str(val).strip()
     if not val: return None, None
-    clean_val = re.sub(r'[()\[\]]', '', val)
+    # 移除常見雜訊
+    clean_val = re.sub(r'[^\w\u4e00-\u9fff]', '', val) # 只留文字數字
     
-    # 1. 代號精確匹配
+    # 1. 精確匹配
     if clean_val in twstock.codes: return clean_val, twstock.codes[clean_val].name
-    
-    # 2. 中文精確匹配
     for c, d in twstock.codes.items():
         if d.type == "股票" and d.name == clean_val: return c, d.name
             
-    # 3. 中文模糊匹配 (避免過短的誤判)
-    if len(clean_val) > 1:
+    # 2. 模糊匹配 (針對 OCR 可能多讀少讀字)
+    if len(clean_val) >= 2: # 至少兩個字才做模糊搜尋
         for c, d in twstock.codes.items():
             if d.type == "股票" and clean_val in d.name: return c, d.name
             
-    if clean_val.replace('.','').isalnum() and not clean_val.isdigit(): return clean_val.upper(), "美股/其他"
     return None, None
 
-# --- V51 OCR 增強版 (關鍵修改) ---
+# --- V52 OCR 診斷核心 ---
 def is_ocr_ready():
     return shutil.which('tesseract') is not None
 
-def try_auto_install_ocr():
+def check_language_pack():
+    """檢查是否真的有中文包"""
     try:
-        st.toast("⏳ 正在執行系統安裝，請稍候 30-60 秒...", icon="⚙️")
-        subprocess.run(['sudo', 'apt-get', 'update'], check=True)
-        subprocess.run(['sudo', 'apt-get', 'install', '-y', 'tesseract-ocr', 'tesseract-ocr-chi-tra', 'libgl1'], check=True)
-        return True, "安裝指令執行完畢，請重新整理頁面！"
-    except Exception as e:
-        return False, f"安裝失敗: {str(e)}"
+        result = subprocess.run(['tesseract', '--list-langs'], capture_output=True, text=True)
+        if 'chi_tra' in result.stdout: return True
+        return False
+    except: return False
 
 def process_image_upload(image_file):
+    debug_info = {"raw_text": "", "processed_img": None, "error": None}
     try:
-        # 1. 開啟圖片
+        # 1. 讀取與轉檔
         img = Image.open(image_file)
+        if img.mode != 'RGB': img = img.convert('RGB')
         
-        # 2. 影像增強預處理 (針對暗黑模式優化)
-        if img.mode == 'RGBA': img = img.convert('RGB') # 轉為 RGB
+        # 2. 影像增強 (V52: 更溫和的處理，避免誤刪紅字)
+        # 先轉灰階
+        gray = img.convert('L')
+        # 反轉顏色 (黑底轉白底)
+        inverted = ImageOps.invert(gray)
+        # 增加對比度 (讓字更黑，底更白)
+        enhancer = ImageEnhance.Contrast(inverted)
+        final_img = enhancer.enhance(2.0)
         
-        # 轉灰階
-        gray_img = img.convert('L') 
-        
-        # 自動反轉顏色 (把黑底白字變成白底黑字)
-        # 這一步對您的截圖至關重要
-        inverted_img = ImageOps.invert(gray_img)
-        
-        # 二值化 (讓文字更銳利)
-        # 門檻值設為 128，低於變成黑，高於變成白
-        threshold_img = inverted_img.point(lambda x: 0 if x < 140 else 255)
-        
-        # (除錯用) 如果需要看處理後的圖，可以取消註解下面這行
-        # st.image(threshold_img, caption="AI 看到的影像 (處理後)")
+        debug_info['processed_img'] = final_img
 
         # 3. 執行辨識
-        try: 
-            # 優先使用繁體中文
-            text = pytesseract.image_to_string(threshold_img, lang='chi_tra+eng')
-        except: 
-            # 沒中文包就退回英文 (但這樣會讀不到您的股票名)
-            text = pytesseract.image_to_string(threshold_img, lang='eng')
-            
+        # 使用 psm 6 (假設是單一區塊文字)，這對清單截圖很有效
+        custom_config = r'--psm 6'
+        
+        try:
+            text = pytesseract.image_to_string(final_img, lang='chi_tra+eng', config=custom_config)
+            debug_info['raw_text'] = text
+        except pytesseract.TesseractError as e:
+            debug_info['error'] = "Tesseract 錯誤 (可能缺中文包)"
+            # 退回英文模式嘗試
+            text = pytesseract.image_to_string(final_img, lang='eng', config=custom_config)
+            debug_info['raw_text'] = f"(中文包失效，僅英文模式)\n{text}"
+
         # 4. 解析文字
         found_stocks = set()
         
-        # 找代號 (4碼數字)
-        codes = re.findall(r'\b\d{4}\b', text)
-        for c in codes:
-            sid, sname = solve_stock_id(c)
-            if sid and sname != "美股/其他": found_stocks.add((sid, sname))
-            
-        # 找中文 (逐行掃描)
+        # 逐行解析
         lines = text.split('\n')
         for line in lines:
-            # 去除雜訊空格
-            clean_line = line.strip().replace(" ", "")
-            # 過濾掉像 "漲跌" "幅度" 這種標題字
-            if len(clean_line) > 1 and clean_line not in ["成交", "漲跌", "幅度", "商品", "群組"]:
+            # 移除所有空白
+            clean_line = line.replace(" ", "").strip()
+            # 嘗試抓出每一行裡可能的股名
+            # 這裡用更寬鬆的邏輯：只要該行包含已知的股票名稱就算中
+            if len(clean_line) > 1:
                 sid, sname = solve_stock_id(clean_line)
-                if sid and sname != "美股/其他": found_stocks.add((sid, sname))
-                
-        return list(found_stocks)
+                if sid: 
+                    found_stocks.add((sid, sname))
+                else:
+                    # 如果整行沒對中，嘗試切分 (例如 "佳能 79.60" -> "佳能")
+                    # 取前2-3個字試試看
+                    head_2 = clean_line[:2]
+                    head_3 = clean_line[:3]
+                    sid2, sname2 = solve_stock_id(head_2)
+                    if sid2: found_stocks.add((sid2, sname2))
+                    else:
+                        sid3, sname3 = solve_stock_id(head_3)
+                        if sid3: found_stocks.add((sid3, sname3))
+
+        return list(found_stocks), debug_info
+        
     except Exception as e:
-        st.error(f"影像處理錯誤: {e}")
-        return []
+        debug_info['error'] = str(e)
+        return [], debug_info
 
 # --- 導航 ---
 def nav_to(mode, code=None, name=None):
@@ -185,26 +190,27 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 51.0 (暗黑模式增強版)")
+    st.markdown("---"); st.caption("Ver: 52.0 (診斷除錯版)")
 
 # --- 主畫面 ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
     ui.render_header("👋 歡迎來到 AI 股市戰情室")
-    st.markdown("### 🚀 V51 更新：暗黑模式截圖支援\n系統已升級影像處理引擎，現在可以讀取「黑底白字」的看盤軟體截圖！")
+    st.markdown("""
+    ### 🚀 V52 更新：OCR 診斷模式
+    * **🔍 深度除錯**：如果截圖辨識失敗，系統會顯示「AI 看到的畫面」與「辨識出的原始文字」，幫助您判斷問題。
+    * **🌗 智能對比**：優化了黑底截圖的處理邏輯，不再誤刪紅/綠色文字。
+    """)
     
-    if not is_ocr_ready():
-        st.error("⚠️ 偵測到 OCR 引擎未安裝！(辨識中文需要此引擎)")
-        c1, c2 = st.columns([1, 2])
-        if c1.button("🔧 點我執行一鍵修復 (安裝中文包)", type="primary"):
-            success, msg = try_auto_install_ocr()
-            if success:
-                st.success(msg)
-                time.sleep(2)
-                st.rerun()
-            else:
-                st.error(msg)
+    # 環境檢查
+    c1, c2 = st.columns(2)
+    with c1:
+        if is_ocr_ready(): st.success("✅ Tesseract 引擎已安裝")
+        else: st.error("❌ Tesseract 引擎未安裝")
+    with c2:
+        if check_language_pack(): st.success("✅ 中文語言包 (chi_tra) 已就緒")
+        else: st.error("❌ 中文語言包未偵測到")
 
 elif mode == 'login':
     ui.render_header("🔐 會員中心")
@@ -237,32 +243,44 @@ elif mode == 'watch':
             if code: db.update_watchlist(uid, code, "add"); st.toast(f"已加入: {name}", icon="✅"); time.sleep(0.5); st.rerun()
             else: st.error(f"找不到: {add_c}")
 
-        # V51: 支援暗黑模式的截圖匯入
-        with st.expander("📸 截圖匯入 (V51 強力版)", expanded=True):
+        # V52: 診斷模式截圖匯入
+        with st.expander("📸 截圖匯入 (V52 診斷版)", expanded=True):
             if is_ocr_ready():
-                st.info("💡 提示：支援黑底或白底的看盤軟體截圖，系統會自動反轉顏色以提高辨識率。")
+                if not check_language_pack():
+                    st.error("⚠️ 警告：系統缺少繁體中文包，辨識能力將受限。")
+                    st.code("sudo apt-get install -y tesseract-ocr-chi-tra", language="bash")
+                
                 uploaded_file = st.file_uploader("選擇圖片", type=['png', 'jpg', 'jpeg'])
+                
                 if uploaded_file:
-                    with st.spinner("AI 正在反轉影像並讀取文字..."): found_list = process_image_upload(uploaded_file)
+                    with st.spinner("AI 正在解析影像..."): 
+                        found_list, debug_info = process_image_upload(uploaded_file)
+                    
                     if found_list:
                         new_stocks = [item for item in found_list if item[0] not in wl]
                         if new_stocks:
-                            st.success(f"🔍 成功辨識 {len(new_stocks)} 檔股票：")
+                            st.success(f"🔍 成功辨識 {len(new_stocks)} 檔股票！")
                             cols = st.columns(4)
                             for i, (wc, wn) in enumerate(new_stocks): cols[i%4].caption(f"✅ {wc} {wn}")
-                            if st.button("📥 全部加入"):
+                            if st.button("📥 全部加入清單"):
                                 for wc, wn in new_stocks: db.update_watchlist(uid, wc, "add")
                                 st.rerun()
-                        else: st.warning("辨識出的股票都已在您的清單中 (或未辨識出有效股名)")
-                    else: 
-                        st.error("未能辨識出股票名稱。")
-                        st.caption("可能原因：1. 圖片過於模糊 2. 系統中文包未安裝成功 3. 截圖未包含完整中文股名")
+                        else: st.warning("辨識出的股票都已在您的清單中。")
+                    else:
+                        st.error("❌ 未能辨識出任何有效股票。")
+                    
+                    # 診斷資訊區 (V52 新增)
+                    with st.expander("🛠️ 點我查看 AI 診斷日誌 (Debug Info)", expanded=False):
+                        if debug_info['error']: st.error(f"錯誤訊息: {debug_info['error']}")
+                        c_d1, c_d2 = st.columns(2)
+                        with c_d1:
+                            st.write("📷 **AI 處理後的影像 (AI 看到這張圖)**:")
+                            if debug_info['processed_img']: st.image(debug_info['processed_img'], use_container_width=True)
+                        with c_d2:
+                            st.write("📝 **AI 讀到的原始文字 (Raw Text)**:")
+                            st.text_area("OCR Result", debug_info['raw_text'], height=300)
             else:
-                st.error("❌ OCR 引擎未就緒")
-                if st.button("🔧 立即安裝引擎"):
-                    success, msg = try_auto_install_ocr()
-                    if success: st.success("安裝完成！請重新整理"); st.rerun()
-                    else: st.error(msg)
+                st.error("❌ OCR 引擎完全未安裝，請聯絡管理員修復。")
 
         st.divider()
         if wl:
