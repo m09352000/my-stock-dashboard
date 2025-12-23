@@ -148,6 +148,7 @@ def get_color_settings(stock_id):
     else: return {"up": "#00FF00", "down": "#FF0000", "delta": "normal"}
 
 def get_stock_data_robust(stock_id):
+    # 1. Yahoo (優先)
     suffixes = ['.TW', '.TWO'] if stock_id.isdigit() else ['']
     for suffix in suffixes:
         try_id = f"{stock_id}{suffix}"
@@ -156,6 +157,7 @@ def get_stock_data_robust(stock_id):
             df = stock.history(period="1mo")
             if not df.empty: return try_id, stock, df, "yahoo"
         except: pass
+    # 2. TWSE (備用)
     if stock_id.isdigit():
         try:
             realtime = twstock.realtime.get(stock_id)
@@ -193,13 +195,14 @@ def go_back():
         st.session_state['view_mode'] = previous
         st.rerun()
 
-# 搜尋處理 (Callback 中移除 st.rerun)
+# 搜尋處理 (由表單提交觸發，不需要在 callback 裡 rerun)
 def handle_search_form():
     raw = st.session_state.sidebar_search_input
     if raw:
         n = "美股"
         if raw in twstock.codes: n = twstock.codes[raw].name
         elif raw.isdigit(): n = "台股"
+        # 直接更新狀態，不需要 st.rerun()，因為 form 提交會自動 rerun
         navigate_to('analysis', raw, n)
 
 def translate_text(text):
@@ -238,11 +241,12 @@ with st.sidebar:
 
     st.divider()
     
-    # 搜尋 (Fix: 移除 callback 錯誤)
+    # 搜尋 (Fix: 移除 on_click 參數，避免 callback 錯誤)
+    # 改為檢查 submit 按鈕的返回值
     with st.form(key='search', clear_on_submit=False):
         st.text_input("🔍 輸入代號 (Enter)", key="sidebar_search_input")
-        # 這裡按鈕按下會觸發 callback 更新 state，表單提交會自動 rerun，所以不用手動 rerun
-        st.form_submit_button("開始搜尋", on_click=handle_search_form)
+        if st.form_submit_button("開始搜尋"):
+            handle_search_form()
 
     st.subheader("🤖 AI 策略")
     c1, c2, c3 = st.columns(3)
@@ -311,7 +315,7 @@ if st.session_state['view_mode'] == 'login_page':
 
 # [頁面 1] 歡迎頁
 elif st.session_state['view_mode'] == 'welcome':
-    st.title("👋 歡迎來到 AI 股市戰情室 V25")
+    st.title("👋 歡迎來到 AI 股市戰情室")
     with st.container(border=True):
         st.markdown("""
         ### 🚀 平台特色
@@ -397,7 +401,7 @@ elif st.session_state['view_mode'] == 'comments':
 # [頁面 9] 新手村 (修復版)
 elif st.session_state['view_mode'] == 'learning_center':
     st.title("📖 股市新手村")
-    # Fix: 修正 tab 變數名稱錯誤
+    # Fix: 修正變數名稱
     tab1, tab2 = st.tabs(["📊 策略邏輯詳解", "📚 名詞詳解大全"])
     
     with tab1:
@@ -426,75 +430,83 @@ elif st.session_state['view_mode'] == 'analysis':
     code_input = st.session_state['current_stock']
     name_input = st.session_state['current_name']
     
-    if not code_input: st.warning("無代號")
-    else:
-        c1, c2 = st.columns([3, 1])
-        c1.title(f"{name_input} {code_input}")
-        if c2.checkbox("🔴 即時"): time.sleep(3); st.rerun()
+    c1, c2, c3 = st.columns([3, 1, 1])
+    c1.title(f"{name_input} {code_input}")
+    if c2.button("⬅️ 返回"): go_back()
+    if c3.checkbox("🔴 即時"): time.sleep(3); st.rerun()
+    
+    # 錯誤修復：將 try block 結構調整正確
+    try:
+        rec = f"{code_input.replace('.TW','').replace('.TWO','')} {name_input}"
+        if rec not in st.session_state['history']: st.session_state['history'].insert(0, rec)
+
+        safe_id, stock, df, source = get_stock_data_robust(code_input.replace('.TW','').replace('.TWO',''))
         
-        try:
-            rec = f"{code_input.replace('.TW','').replace('.TWO','')} {name_input}"
-            if rec not in st.session_state['history']: st.session_state['history'].insert(0, rec)
-
-            safe_id, stock, df, source = get_stock_data_robust(code_input.replace('.TW','').replace('.TWO',''))
+        if source == "fail": 
+            st.error(f"❌ 查無資料")
+        
+        elif source == "yahoo":
+            df_hist = stock.history(period="1y"); info = stock.info
+            clr = get_color_settings(code_input)
+            curr = df_hist['Close'].iloc[-1]; prev = df_hist['Close'].iloc[-2]
+            chg = curr - prev; pct = (chg/prev)*100
+            vt = df_hist['Volume'].iloc[-1]; vy = df_hist['Volume'].iloc[-2]; va = df_hist['Volume'].tail(5).mean()
             
-            if source == "fail": st.error("查無資料")
-            elif source == "yahoo":
-                df_hist = stock.history(period="1y"); info = stock.info
-                clr = get_color_settings(code_input)
-                curr = df_hist['Close'].iloc[-1]; prev = df_hist['Close'].iloc[-2]
-                chg = curr - prev; pct = (chg/prev)*100
-                vt = df_hist['Volume'].iloc[-1]; vy = df_hist['Volume'].iloc[-2]; va = df_hist['Volume'].tail(5).mean()
-                
-                with st.expander("🏢 公司簡介"): st.write(translate_text(info.get('longBusinessSummary','')))
-                st.divider()
-                
-                m1, m2, m3, m4, m5 = st.columns(5)
-                m1.metric("成交價", f"{curr:.2f}", f"{chg:.2f} ({pct:.2f}%)", delta_color=clr['delta'])
-                m2.metric("最高價", f"{df_hist['High'].iloc[-1]:.2f}")
-                m3.metric("最低價", f"{df_hist['Low'].iloc[-1]:.2f}")
-                m4.metric("振幅", f"{((df_hist['High'].iloc[-1]-df_hist['Low'].iloc[-1])/prev)*100:.2f}%")
-                mf = "主力進貨 🔴" if (chg>0 and vt>vy) else ("主力出貨 🟢" if (chg<0 and vt>vy) else "觀望")
-                m5.metric("主力動向", mf)
-                
-                v1, v2, v3, v4, v5 = st.columns(5)
-                v1.metric("今日成交量", f"{int(vt/1000):,} 張")
-                v2.metric("昨日成交量", f"{int(vy/1000):,} 張", f"{int((vt-vy)/1000)} 張")
-                v3.metric("本週均量", f"{int(va/1000):,} 張")
-                vr = vt/va if va>0 else 1
-                vs = "🔥 爆量" if vr>1.5 else ("💤 量縮" if vr<0.6 else "正常")
-                v4.metric("量能狀態", vs)
-                v5.metric("外資持股", f"{info.get('heldPercentInstitutions',0)*100:.1f}%")
-                
-                st.subheader("📈 技術 K 線圖")
-                df_hist['MA5'] = df_hist['Close'].rolling(5).mean(); df_hist['MA20'] = df_hist['Close'].rolling(20).mean()
-                sl = st.select_slider("區間", ['3月','6月'], value='6月'); dy = {'3月':90,'6月':180}[sl]
-                cd = df_hist.tail(dy)
-                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
-                fig.add_trace(go.Candlestick(x=cd.index, open=cd['Open'], high=cd['High'], low=cd['Low'], close=cd['Close'], increasing_line_color=clr['up'], decreasing_line_color=clr['down']), row=1, col=1)
-                fig.add_trace(go.Scatter(x=cd.index, y=cd['MA5'], line=dict(color='blue'), name='MA5'), row=1, col=1)
-                fig.add_trace(go.Scatter(x=cd.index, y=cd['MA20'], line=dict(color='orange'), name='MA20'), row=1, col=1)
-                vc = [clr['up'] if c>=o else clr['down'] for c,o in zip(cd['Close'],cd['Open'])]
-                fig.add_trace(go.Bar(x=cd.index, y=cd['Volume'], marker_color=vc), row=2, col=1)
-                fig.update_layout(height=500, xaxis_rangeslider_visible=False, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar':False})
-                
-                st.subheader("🤖 AI 診斷分析")
-                m20 = df_hist['MA20'].iloc[-1]; m60 = df_hist['Close'].rolling(60).mean().iloc[-1]
-                diff = df_hist['Close'].diff(); u=diff.copy(); dd=diff.copy(); u[u<0]=0; dd[dd>0]=0
-                rs = u.rolling(14).mean()/dd.abs().rolling(14).mean(); rsi = (100-100/(1+rs)).iloc[-1]
-                bias = ((curr-m60)/m60)*100
-                with st.container(border=True):
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.markdown("### 趨勢訊號")
-                        if curr > m20 and m20 > m60: st.success("🔥 多頭排列")
-                        elif curr < m20 and m20 < m60: st.error("❄️ 空頭排列")
-                        else: st.warning("⚖️ 盤整震盪")
-                    with c2:
-                        st.markdown("### 關鍵指標")
-                        st.write(f"RSI: `{rsi:.1f}` | 乖離率: `{bias:.2f}%`")
+            with st.expander("🏢 公司簡介"): st.write(translate_text(info.get('longBusinessSummary','')))
+            st.divider()
+            
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("成交價", f"{curr:.2f}", f"{chg:.2f} ({pct:.2f}%)", delta_color=clr['delta'])
+            m2.metric("最高價", f"{df_hist['High'].iloc[-1]:.2f}")
+            m3.metric("最低價", f"{df_hist['Low'].iloc[-1]:.2f}")
+            m4.metric("振幅", f"{((df_hist['High'].iloc[-1]-df_hist['Low'].iloc[-1])/prev)*100:.2f}%")
+            mf = "主力進貨 🔴" if (chg>0 and vt>vy) else ("主力出貨 🟢" if (chg<0 and vt>vy) else "觀望")
+            m5.metric("主力動向", mf)
+            
+            v1, v2, v3, v4, v5 = st.columns(5)
+            v1.metric("今日成交量", f"{int(vt/1000):,} 張")
+            v2.metric("昨日成交量", f"{int(vy/1000):,} 張", f"{int((vt-vy)/1000)} 張")
+            v3.metric("本週均量", f"{int(va/1000):,} 張")
+            vr = vt/va if va>0 else 1
+            vs = "🔥 爆量" if vr>1.5 else ("💤 量縮" if vr<0.6 else "正常")
+            v4.metric("量能狀態", vs)
+            v5.metric("外資持股", f"{info.get('heldPercentInstitutions',0)*100:.1f}%")
+            
+            st.subheader("📈 技術 K 線圖")
+            df_hist['MA5'] = df_hist['Close'].rolling(5).mean(); df_hist['MA20'] = df_hist['Close'].rolling(20).mean()
+            sl = st.select_slider("區間", ['3月','6月'], value='6月'); dy = {'3月':90,'6月':180}[sl]
+            cd = df_hist.tail(dy)
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
+            fig.add_trace(go.Candlestick(x=cd.index, open=cd['Open'], high=cd['High'], low=cd['Low'], close=cd['Close'], increasing_line_color=clr['up'], decreasing_line_color=clr['down']), row=1, col=1)
+            fig.add_trace(go.Scatter(x=cd.index, y=cd['MA5'], line=dict(color='blue'), name='MA5'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=cd.index, y=cd['MA20'], line=dict(color='orange'), name='MA20'), row=1, col=1)
+            vc = [clr['up'] if c>=o else clr['down'] for c,o in zip(cd['Close'],cd['Open'])]
+            fig.add_trace(go.Bar(x=cd.index, y=cd['Volume'], marker_color=vc), row=2, col=1)
+            fig.update_layout(height=500, xaxis_rangeslider_visible=False, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar':False})
+            
+            st.subheader("🤖 AI 診斷分析")
+            m20 = df_hist['MA20'].iloc[-1]; m60 = df_hist['Close'].rolling(60).mean().iloc[-1]
+            diff = df_hist['Close'].diff(); u=diff.copy(); dd=diff.copy(); u[u<0]=0; dd[dd>0]=0
+            rs = u.rolling(14).mean()/dd.abs().rolling(14).mean(); rsi = (100-100/(1+rs)).iloc[-1]
+            bias = ((curr-m60)/m60)*100
+            
+            with st.container(border=True):
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("### 趨勢訊號")
+                    if curr > m20 and m20 > m60: st.success("🔥 **多頭排列**：趨勢強勁向上。")
+                    elif curr < m20 and m20 < m60: st.error("❄️ **空頭排列**：上方壓力沉重。")
+                    else: st.warning("⚖️ **盤整震盪**：方向不明。")
+                with c2:
+                    st.markdown("### 關鍵指標")
+                    st.write(f"• **RSI 強弱**: `{rsi:.1f}`")
+                    if rsi>80: st.warning("⚠️ 短線過熱 (RSI>80)")
+                    elif rsi<20: st.success("💎 短線超賣 (RSI<20)")
+                    else: st.info("✅ 中性區間")
+                    st.write(f"• **季線乖離**: `{bias:.2f}%`")
 
+        # 修復的 elif 結構
         elif source == "twse_backup":
             st.warning("⚠️ 使用 TWSE 備援數據 (無 K 線)")
             curr = df['Close']; prev = df['PreClose']; chg = curr - prev if prev else 0; pct = (chg/prev)*100 if prev else 0
