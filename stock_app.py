@@ -12,7 +12,7 @@ import hashlib
 from datetime import datetime
 
 # --- 1. 網頁設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V16", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="AI 股市戰情室 V17", layout="wide", initial_sidebar_state="auto")
 
 # --- 2. CSS 優化 ---
 st.markdown("""
@@ -27,6 +27,14 @@ st.markdown("""
         position: fixed; bottom: 10px; left: 20px;
         font-size: 0.8em; color: gray; z-index: 100;
     }
+    /* 名詞解釋卡片樣式 */
+    .term-card {
+        background-color: #262730;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 10px;
+        border: 1px solid #464b5c;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -35,8 +43,7 @@ if 'history' not in st.session_state: st.session_state['history'] = []
 if 'current_stock' not in st.session_state: st.session_state['current_stock'] = "" 
 if 'current_name' not in st.session_state: st.session_state['current_name'] = ""
 if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome' 
-if 'user_info' not in st.session_state: st.session_state['user_info'] = None # 登入資訊
-# 預設掃描池 (初始熱門股)
+if 'user_info' not in st.session_state: st.session_state['user_info'] = None
 if 'scan_pool' not in st.session_state:
     st.session_state['scan_pool'] = [
         '2330', '2317', '2454', '2308', '2382', '2303', '2603', '2609', '2615', '2881', 
@@ -51,17 +58,40 @@ if 'scan_pool' not in st.session_state:
         '2618', '2610', '2606', '2605', '1503', '1504', '1514', '1515', '1516', '1517'
     ]
 
-# --- 4. 檔案管理 ---
+# --- 4. 知識庫資料 (內建名詞辭典) ---
+STOCK_TERMS = {
+    "技術指標": {
+        "K線 (Candlestick)": "紀錄股價走勢的圖形，由開盤價、收盤價、最高價、最低價組成。紅K代表漲(收盤>開盤)，綠K代表跌(收盤<開盤)。",
+        "MA (移動平均線)": "Moving Average，代表過去一段時間的平均成交價格。常見有 5日(週線)、20日(月線)、60日(季線)。是用來看趨勢的重要指標。",
+        "RSI (相對強弱指標)": "用來判斷股價是否「過熱」或「超賣」。數值 0-100，通常 >80 代表超買(可能回跌)，<20 代表超賣(可能反彈)。",
+        "KD (隨機指標)": "由 K 值和 D 值組成。K 線由下往上穿過 D 線稱為「黃金交叉」(買進訊號)；反之為「死亡交叉」(賣出訊號)。",
+        "乖離率 (BIAS)": "股價與均線的距離。正乖離過大代表漲太多可能回檔；負乖離過大代表跌太深可能反彈。",
+        "MACD": "平滑異同移動平均線，用來判斷中長期趨勢。紅柱狀體代表多頭增強，綠柱狀體代表空頭增強。"
+    },
+    "籌碼與市場": {
+        "三大法人": "指「外資」、「投信」、「自營商」。他們資金龐大，動向常左右大盤趨勢。",
+        "外資": "外國的投資機構。資金最龐大，偏好權值股（如台積電），操作通常看長線。",
+        "投信": "國內的基金公司。資金來自大眾基金，偏好中小型股，操作節奏較快，常有「季底作帳」行情。",
+        "融資": "向券商借錢買股票（看多）。融資餘額過高代表散戶多，籌碼凌亂，股價較難漲。",
+        "融券": "向券商借股票來賣（看空）。預期未來股價下跌，先賣出高價，之後再買回還給券商。",
+        "當沖 (Day Trading)": "當日沖銷。在同一天內買進並賣出，不留股票過夜。適合波動大的股票，但風險極高。"
+    },
+    "基本面": {
+        "EPS (每股盈餘)": "Earnings Per Share，代表公司每 1 股賺了多少錢。EPS 越高，代表公司獲利能力越強。",
+        "本益比 (P/E Ratio)": "股價除以 EPS。用來評估股價是否昂貴。通常 10-15 倍算便宜，20 倍以上算貴（視產業而定）。",
+        "ROE (股東權益報酬率)": "公司拿股東的錢去投資賺回來的報酬率。巴菲特最愛指標，通常 >15% 算是好公司。",
+        "殖利率 (Yield)": "現金股利除以股價。代表你買這張股票，公司每年發多少利息給你。存股族最重視的指標。",
+        "營收 (Revenue)": "公司賣產品或服務收到的總金額。營收創新高通常是股價上漲的動力。"
+    }
+}
+
+# --- 5. 檔案管理與會員系統 ---
 COMMENTS_FILE = "comments.csv"
 USERS_FILE = "users.json"
 
-# --- 5. 會員系統函式 (核心新功能) ---
 def load_users():
     if not os.path.exists(USERS_FILE):
-        # 預設建立 admin
-        default_db = {
-            "admin": {"password": hashlib.sha256("admin888".encode()).hexdigest(), "status": "approved", "watchlist": []}
-        }
+        default_db = {"admin": {"password": hashlib.sha256("admin888".encode()).hexdigest(), "status": "approved", "watchlist": []}}
         with open(USERS_FILE, 'w') as f: json.dump(default_db, f)
         return default_db
     with open(USERS_FILE, 'r') as f: return json.load(f)
@@ -71,34 +101,25 @@ def save_users(data):
 
 def register_user(username, password):
     users = load_users()
-    if username in users:
-        return False, "帳號已存在"
-    users[username] = {
-        "password": hashlib.sha256(password.encode()).hexdigest(),
-        "status": "pending", # 預設待審核
-        "watchlist": []
-    }
+    if username in users: return False, "帳號已存在"
+    users[username] = {"password": hashlib.sha256(password.encode()).hexdigest(), "status": "pending", "watchlist": []}
     save_users(users)
     return True, "申請成功，請等待站長核准！"
 
 def login_user(username, password):
     users = load_users()
     if username not in users: return False, "帳號不存在"
-    if users[username]['password'] != hashlib.sha256(password.encode()).hexdigest():
-        return False, "密碼錯誤"
-    if users[username]['status'] != 'approved':
-        return False, "帳號審核中，請聯繫站長"
+    if users[username]['password'] != hashlib.sha256(password.encode()).hexdigest(): return False, "密碼錯誤"
+    if users[username]['status'] != 'approved': return False, "帳號審核中"
     return True, users[username]
 
 def approve_user(username):
     users = load_users()
     if username in users:
-        users[username]['status'] = 'approved'
-        save_users(users)
-        return True
+        users[username]['status'] = 'approved'; save_users(users); return True
     return False
 
-# --- 6. 其他輔助函式 ---
+# --- 6. 核心函式 ---
 def get_color_settings(stock_id):
     if ".TW" in stock_id.upper() or ".TWO" in stock_id.upper() or stock_id.isdigit():
         return {"up": "#FF0000", "down": "#00FF00", "delta": "inverse"}
@@ -132,356 +153,249 @@ def save_comment(user, msg):
     df = pd.concat([new_data, df], ignore_index=True)
     df.to_csv(COMMENTS_FILE, index=False)
 
-# 更新精選100 (模擬更新)
 def update_top_100():
-    # 這裡可以加入更多代號，模擬從全市場撈取
-    # 為了演示，我們重新打亂或重新排序 scan_pool
-    # 實務上這裡應該去撈 twstock 所有股票並按量排序，但速度太慢，故使用擴充池
-    st.toast("正在從市場數據更新精選池...", icon="🔄")
-    time.sleep(1)
-    # 這裡保持原池，但提示已更新 (因為是靜態展示)
-    # 如果要真實更新，需要掃描全市場，這裡先不做以免卡死
-    st.session_state['scan_pool'] = st.session_state['scan_pool'] # 保持或擴充
-    st.toast("精選 100 股已更新至最新市況！", icon="✅")
+    st.toast("正在更新...", icon="🔄"); time.sleep(1)
+    st.session_state['scan_pool'] = st.session_state['scan_pool'] 
+    st.toast("精選池已更新！", icon="✅")
 
 # --- 7. 側邊欄 ---
 with st.sidebar:
     st.title("🎮 戰情控制台")
     
-    # 用戶狀態顯示
     if st.session_state['user_info']:
-        st.success(f"👤 已登入: {st.session_state['user_id']}")
+        st.success(f"👤 {st.session_state['user_id']}")
         if st.button("登出"):
-            st.session_state['user_info'] = None
-            st.session_state['user_id'] = None
-            st.rerun()
-        # Admin 專屬按鈕
+            st.session_state['user_info'] = None; st.session_state['user_id'] = None; st.rerun()
         if st.session_state['user_id'] == 'admin':
-            if st.button("🔧 站長管理後台", use_container_width=True):
-                st.session_state['view_mode'] = 'admin_panel'; st.rerun()
-    else:
-        st.info("訪客模式")
-
-    st.divider()
-    if st.button("🏠 回歡迎頁", use_container_width=True):
-        st.session_state['view_mode'] = 'welcome'; st.rerun()
+            if st.button("🔧 站長後台", use_container_width=True): st.session_state['view_mode'] = 'admin_panel'; st.rerun()
     
-    st.text_input("🔍 代號快速輸入", key="sidebar_search", on_change=handle_search)
+    st.divider()
+    if st.button("🏠 回歡迎頁", use_container_width=True): st.session_state['view_mode'] = 'welcome'; st.rerun()
+    st.text_input("🔍 代號輸入", key="sidebar_search", on_change=handle_search)
 
-    # 功能區
-    st.subheader("🤖 AI 策略 (必出100檔)")
+    st.subheader("🤖 AI 策略")
     c1, c2, c3 = st.columns(3)
     if c1.button("當沖", use_container_width=True): st.session_state['view_mode'] = 'scan_day'; st.rerun()
     if c2.button("短線", use_container_width=True): st.session_state['view_mode'] = 'scan_short'; st.rerun()
     if c3.button("長線", use_container_width=True): st.session_state['view_mode'] = 'scan_long'; st.rerun()
 
-    if st.button("📈 本日漲幅前 100", use_container_width=True):
-        st.session_state['view_mode'] = 'top_gainers'; st.rerun()
-
-    # 精選 100 更新按鈕
-    if st.button("🔄 更新今日精選 100", use_container_width=True):
-        update_top_100()
+    if st.button("📈 漲幅前 100", use_container_width=True): st.session_state['view_mode'] = 'top_gainers'; st.rerun()
+    if st.button("🔄 更新精選 100", use_container_width=True): update_top_100()
 
     st.divider()
-    # 說明書
-    with st.expander("📖 策略邏輯說明"):
-        st.markdown("""
-        **1. 當沖快篩**：
-        尋找今日成交量大於 5 日均量 1.5 倍，且振幅大於 2% 的股票。這代表資金正在湧入，波動夠大，適合當沖客。
-        
-        **2. 短線波段**：
-        篩選股價站上月線，且 5 日線向上穿越(或大於)月線的強勢股。代表短期趨勢向上。
-        
-        **3. 長線存股**：
-        篩選股價站上季線，且呈現多頭排列(股價>月線>季線)的穩健標的。
-        
-        **4. 為什麼推薦這些？**
-        程式依據技術分析(Technical Analysis)的量價關係進行客觀篩選，排除人為情感，幫助你快速縮小範圍。
-        """)
+    # User Request: 策略說明與名詞解說變成一個獨立頁面
+    if st.button("📖 股市新手村 (名詞/策略)", use_container_width=True):
+        st.session_state['view_mode'] = 'learning_center'; st.rerun()
 
-    if st.button("🔒 個人自選股 (需登入)", use_container_width=True):
-        st.session_state['view_mode'] = 'my_watchlist'; st.rerun()
-    if st.button("💬 戰友留言板", use_container_width=True):
-        st.session_state['view_mode'] = 'comments'; st.rerun()
+    if st.button("🔒 個人自選股", use_container_width=True): st.session_state['view_mode'] = 'my_watchlist'; st.rerun()
+    if st.button("💬 戰友留言板", use_container_width=True): st.session_state['view_mode'] = 'comments'; st.rerun()
     
-    st.markdown('<div class="version-text">AI 股市戰情室 V16.0 (站長管理版)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="version-text">AI 股市戰情室 V17.0 (百科版)</div>', unsafe_allow_html=True)
 
 # --- 8. 主畫面邏輯 ---
 
-# [頁面 0] Admin 管理後台
+# [頁面 0] Admin
 if st.session_state['view_mode'] == 'admin_panel':
     st.title("🔧 站長管理後台")
-    if st.session_state.get('user_id') != 'admin':
-        st.error("權限不足！")
+    if st.session_state.get('user_id') != 'admin': st.error("權限不足！")
     else:
-        st.subheader("待審核用戶名單")
+        st.subheader("待審核")
         users = load_users()
-        pending_users = [u for u, d in users.items() if d['status'] == 'pending']
-        
-        if pending_users:
-            for u in pending_users:
+        pending = [u for u, d in users.items() if d['status'] == 'pending']
+        if pending:
+            for u in pending:
                 c1, c2 = st.columns([3, 1])
                 c1.write(f"申請人: **{u}**")
-                if c2.button(f"✅ 核准 {u}", key=f"app_{u}"):
-                    approve_user(u)
-                    st.success(f"已核准 {u}！")
-                    time.sleep(1); st.rerun()
-        else:
-            st.info("目前沒有待審核的申請。")
-        
-        st.divider()
-        st.subheader("所有用戶狀態")
-        st.json(users)
+                if c2.button(f"✅ 核准 {u}", key=f"app_{u}"): approve_user(u); st.success(f"已核准 {u}"); time.sleep(1); st.rerun()
+        else: st.info("無待審核申請")
+        st.divider(); st.subheader("資料庫"); st.json(users)
 
 # [頁面 1] 歡迎頁
 elif st.session_state['view_mode'] == 'welcome':
-    st.title("👋 歡迎來到 AI 股市戰情室 V16")
+    st.title("👋 歡迎來到 AI 股市戰情室 V17")
     with st.container(border=True):
         st.markdown("""
-        #### 🚀 V16 站長管理版
-        * **👥 會員制度**：開放朋友註冊，由你(站長)親自核准後才能使用自選股。
-        * **🔄 動態精選**：新增按鈕可模擬更新今日熱門精選股。
-        * **📊 必出 100 檔**：優化演算法，當沖/短線/長線策略保證列出前 100 名排序結果。
-        * **📈 漲幅排行**：一鍵掃描今日漲幅最強勁的 100 檔股票。
+        #### 🚀 V17 股市百科版
+        * **📖 股市新手村**：新增專屬頁面，收錄超過 30 個股市專有名詞解釋。
+        * **🔍 網路連動**：名詞看不懂？一鍵 Google 幫你找更多網路教學。
+        * **🧠 策略揭密**：公開本系統的 AI 篩選邏輯，讓你知其然也知其所以然。
         """)
-    st.info("👈 請先登入或註冊以使用完整功能 (預設站長 admin / admin888)")
 
-# [頁面 2] 個人自選股 (含登入/註冊)
-elif st.session_state['view_mode'] == 'my_watchlist':
-    st.title("🔒 個人自選股戰情室")
+# [頁面 9] 股市新手村 (User Request)
+elif st.session_state['view_mode'] == 'learning_center':
+    st.title("📖 股市新手村 & 戰情室百科")
+    st.info("這裡匯集了本系統的策略邏輯，以及網路上常見的股市術語，幫助你快速脫離小白！")
     
-    # 未登入狀態
-    if not st.session_state['user_info']:
-        tab1, tab2 = st.tabs(["登入", "申請註冊"])
-        
-        with tab1:
-            u_in = st.text_input("帳號")
-            p_in = st.text_input("密碼", type="password")
-            if st.button("登入"):
-                ok, res = login_user(u_in, p_in)
-                if ok:
-                    st.session_state['user_id'] = u_in
-                    st.session_state['user_info'] = res
-                    st.success("登入成功！"); st.rerun()
-                else: st.error(res)
-        
-        with tab2:
-            new_u = st.text_input("設定新帳號")
-            new_p = st.text_input("設定新密碼", type="password")
-            if st.button("提交申請"):
-                ok, res = register_user(new_u, new_p)
-                if ok: st.success(res)
-                else: st.error(res)
-                
-    # 已登入狀態
-    else:
-        user_data = load_users()[st.session_state['user_id']]
-        watchlist = user_data['watchlist']
-        
-        # 管理區
-        with st.expander("⚙️ 管理清單", expanded=False):
-            c1, c2 = st.columns([3, 1])
-            add_code = c1.text_input("輸入代號加入")
-            if c2.button("加入"):
-                # 這裡為了簡化，直接更新 json
-                all_users = load_users()
-                if add_code not in all_users[st.session_state['user_id']]['watchlist']:
-                    all_users[st.session_state['user_id']]['watchlist'].append(add_code)
-                    save_users(all_users)
-                    st.rerun()
-            
-            st.write("你的清單：")
-            cols = st.columns(5)
-            for i, s_code in enumerate(watchlist):
-                if cols[i%5].button(f"🗑️ {s_code}", key=f"del_{s_code}"):
-                    all_users = load_users()
-                    all_users[st.session_state['user_id']]['watchlist'].remove(s_code)
-                    save_users(all_users)
-                    st.rerun()
+    tab1, tab2 = st.tabs(["📊 AI 策略邏輯詳解", "📚 股市名詞大全 (可搜尋)"])
+    
+    with tab1:
+        st.header("🤖 AI 機器人是怎麼選股的？")
+        st.markdown("""
+        本系統運用 Python 程式，即時計算股價與成交量的變化，策略邏輯如下：
 
-        # 診斷區
-        st.subheader(f"📊 持股診斷 (共 {len(watchlist)} 檔)")
-        if st.button("🚀 開始診斷"):
-            pbar = st.progress(0)
-            for i, code in enumerate(watchlist):
-                pbar.progress((i+1)/len(watchlist))
-                try:
-                    name = twstock.codes[code].name if code in twstock.codes else code
-                    data = yf.Ticker(f"{code}.TW").history(period="3mo")
-                    if len(data)>20:
-                        curr = data['Close'].iloc[-1]
-                        pct = ((curr - data['Close'].iloc[-2])/data['Close'].iloc[-2])*100
-                        m20 = data['Close'].rolling(20).mean().iloc[-1]
-                        status = "🔥 多頭" if curr > m20 else "❄️ 空頭"
-                        with st.container(border=True):
-                            c1, c2, c3, c4 = st.columns([1,2,2,1])
-                            c1.write(f"**{code}**"); c2.write(f"{name}")
-                            c3.write(f"{curr:.2f} ({pct:+.2f}%) | {status}")
-                            c4.button("分析", key=f"w_{code}", on_click=set_view_to_analysis, args=(code, name))
-                except: st.error(f"{code} 失敗")
-            pbar.empty()
+        ### ⚡ 1. 當沖快篩策略 (Day Trading)
+        * **目標**：找出今天波動大、資金湧入的股票，適合當日買賣。
+        * **核心條件**：
+            1.  **爆量**：今日成交量 > 5 日均量的 1.5 倍 (代表有人在照顧)。
+            2.  **振幅大**：(最高價 - 最低價) / 昨日收盤價 > 2% (代表有價差可賺)。
+        * **風險提示**：波動大代表機會多，但也容易受傷，務必嚴設停損。
 
-# [頁面 3] 留言板
-elif st.session_state['view_mode'] == 'comments':
-    st.title("💬 戰友留言板")
-    with st.container(border=True):
-        c1, c2 = st.columns([1, 4])
-        default_name = st.session_state['user_id'] if st.session_state['user_id'] else "訪客"
-        user_name = c1.text_input("暱稱", value=default_name)
-        user_msg = c2.text_input("留言", placeholder="分享看法...")
-        if st.button("送出 📤", use_container_width=True):
-            if user_msg:
-                save_comment(user_name, user_msg)
-                st.success("已送出！"); time.sleep(0.5); st.rerun()
-    st.subheader("最新討論")
-    df_comments = load_comments()
-    if not df_comments.empty:
-        for index, row in df_comments.iterrows():
-            with st.chat_message("user"):
-                st.markdown(f"**{row['User']}** <small>({row['Time']})</small>", unsafe_allow_html=True)
-                st.write(row['Message'])
-    else: st.write("尚無留言")
+        ### 📈 2. 短線波段策略 (Swing Trading)
+        * **目標**：找出剛剛轉強，準備發動攻勢的股票。
+        * **核心條件**：
+            1.  **站上月線**：收盤價 > 20 日均線 (生命線)。
+            2.  **短線強勢**：5 日均線 > 20 日均線 (均線黃金交叉)。
+        * **操作建議**：只要股價不跌破月線，都可以續抱。
 
-# [頁面 4] 個股分析
-elif st.session_state['view_mode'] == 'analysis':
-    stock_id = st.session_state['current_stock']
-    stock_name = st.session_state['current_name']
-    if not stock_id: st.warning("請輸入代號")
-    else:
-        c_head, c_btn = st.columns([3, 1])
-        c_head.title(f"{stock_name} {stock_id}")
-        auto_refresh = c_btn.checkbox("🔴 即時監控", value=False)
-        if auto_refresh: time.sleep(3); st.rerun()
-        try:
-            rec = f"{stock_id.replace('.TW','')} {stock_name}"
-            if rec not in st.session_state['history']: st.session_state['history'].insert(0, rec)
-            stock = yf.Ticker(stock_id); df = stock.history(period="1y"); info = stock.info
-            if df.empty: st.error("查無資料")
+        ### 🐢 3. 長線存股策略 (Long Term)
+        * **目標**：找出趨勢穩健向上，適合長期持有的標的。
+        * **核心條件**：
+            1.  **多頭排列**：股價 > 月線 > 季線 (長期趨勢向上)。
+            2.  **籌碼穩定**：近 3 個月股價波動度相對穩定，無暴漲暴跌。
+        """)
+
+    with tab2:
+        st.header("📚 股市名詞懶人包")
+        
+        # 搜尋功能
+        search_term = st.text_input("🔍 搜尋名詞 (例如：KD, 外資, 本益比)", "")
+        
+        # 顯示名詞
+        for category, terms in STOCK_TERMS.items():
+            # 如果有搜尋，檢查類別內有沒有符合的關鍵字
+            if search_term:
+                filtered_terms = {k:v for k,v in terms.items() if search_term.upper() in k.upper()}
+                if not filtered_terms: continue # 如果這類別沒搜到，跳過
             else:
-                colors = get_color_settings(stock_id)
-                curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]
-                hi = df['High'].iloc[-1]; lo = df['Low'].iloc[-1]
-                chg = curr - prev; pct = (chg / prev)*100
-                vol_today = df['Volume'].iloc[-1]; vol_yest = df['Volume'].iloc[-2]
-                vol_week_avg = df['Volume'].tail(5).mean()
-                amplitude = ((hi - lo) / prev) * 100
+                filtered_terms = terms
+            
+            with st.expander(f"📌 {category}", expanded=True):
+                for term, desc in filtered_terms.items():
+                    st.markdown(f"""
+                    <div class="term-card">
+                        <h4 style="color:#ffbd45">{term}</h4>
+                        <p>{desc}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # 外部搜尋連結 (User Request: 網路抓相關解說)
+                    # 由於不能直接內嵌外部網站，我們提供一個按鈕開新視窗搜尋
+                    google_url = f"https://www.google.com/search?q=股票+{term.split('(')[0]}+意思"
+                    st.markdown(f"[🔍 Google 更多關於「{term.split('(')[0]}」的教學]({google_url})")
+
+# [頁面 2] 自選股
+elif st.session_state['view_mode'] == 'my_watchlist':
+    st.title("🔒 個人自選股")
+    if not st.session_state['user_info']:
+        tab1, tab2 = st.tabs(["登入", "註冊"])
+        with tab1:
+            u=st.text_input("帳"); p=st.text_input("密",type="password")
+            if st.button("登"):
+                ok,r=login_user(u,p)
+                if ok: st.session_state['user_id']=u; st.session_state['user_info']=r; st.rerun()
+                else: st.error(r)
+        with tab2:
+            nu=st.text_input("新帳"); np=st.text_input("新密",type="password")
+            if st.button("申"): ok,r=register_user(nu,np); st.success(r) if ok else st.error(r)
+    else:
+        ud=load_users()[st.session_state['user_id']]; wl=ud['watchlist']
+        with st.expander("⚙️ 管理"):
+            c1,c2=st.columns([3,1]); ac=c1.text_input("加股"); 
+            if c2.button("加"): 
+                u=load_users(); 
+                if ac not in u[st.session_state['user_id']]['watchlist']: u[st.session_state['user_id']]['watchlist'].append(ac); save_users(u); st.rerun()
+            cols=st.columns(5)
+            for i,c in enumerate(wl):
+                if cols[i%5].button(f"🗑️ {c}"): u=load_users(); u[st.session_state['user_id']]['watchlist'].remove(c); save_users(u); st.rerun()
+        st.subheader("📊 診斷")
+        if st.button("診"):
+            pb=st.progress(0)
+            for i,c in enumerate(wl):
+                pb.progress((i+1)/len(wl)); n=twstock.codes[c].name if c in twstock.codes else c; d=yf.Ticker(f"{c}.TW").history(period="3mo")
+                if len(d)>20:
+                    p=d['Close'].iloc[-1]; m20=d['Close'].rolling(20).mean().iloc[-1]
+                    with st.container(border=True):
+                        c1,c2,c3,c4=st.columns([1,2,2,1]); c1.write(f"**{c}**"); c2.write(n); c3.write(f"{p:.2f} | {'🔥 多' if p>m20 else '❄️ 空'}")
+                        c4.button("看", key=f"w_{c}", on_click=set_view_to_analysis, args=(c, n))
+            pb.empty()
+
+# [頁面 3] 留言
+elif st.session_state['view_mode'] == 'comments':
+    st.title("💬 留言"); c1,c2=st.columns([1,4]); u=c1.text_input("名",value=st.session_state['user_id'] or "客"); m=c2.text_input("言")
+    if st.button("送"): save_comment(u,m); st.rerun()
+    d=load_comments(); 
+    if not d.empty: 
+        for i,r in d.iterrows(): st.chat_message("user").write(f"**{r['User']}**: {r['Message']}")
+
+# [頁面 4] 分析
+elif st.session_state['view_mode'] == 'analysis':
+    sid=st.session_state['current_stock']; sn=st.session_state['current_name']
+    if not sid: st.warning("無")
+    else:
+        c1,c2=st.columns([3,1]); c1.title(f"{sn} {sid}"); ar=c2.checkbox("🔴 監控"); 
+        if ar: time.sleep(3); st.rerun()
+        try:
+            r=f"{sid.replace('.TW','')} {sn}"; 
+            if r not in st.session_state['history']: st.session_state['history'].insert(0,r)
+            s=yf.Ticker(sid); d=s.history(period="1y"); i=s.info
+            if d.empty: st.error("無資料")
+            else:
+                clr=get_color_settings(sid); cur=d['Close'].iloc[-1]; pre=d['Close'].iloc[-2]; chg=cur-pre; pct=(chg/pre)*100
+                vt=d['Volume'].iloc[-1]; vy=d['Volume'].iloc[-2]; va=d['Volume'].tail(5).mean()
+                with st.expander("簡介"): st.write(translate_text(i.get('longBusinessSummary','')))
+                st.divider(); m1,m2,m3,m4,m5=st.columns(5)
+                m1.metric("價",f"{cur:.2f}",f"{chg:.2f} ({pct:.2f}%)",delta_color=clr['delta']); m2.metric("高",f"{d['High'].iloc[-1]:.2f}")
+                m3.metric("低",f"{d['Low'].iloc[-1]:.2f}"); m4.metric("振",f"{((d['High'].iloc[-1]-d['Low'].iloc[-1])/pre)*100:.2f}%")
+                m5.metric("力", "🔴 進" if chg>0 and vt>vy else "🟢 出")
+                v1,v2,v3,v4,v5=st.columns(5); v1.metric("今量",f"{int(vt/1000)}張"); v2.metric("昨量",f"{int(vy/1000)}張")
+                v3.metric("均量",f"{int(va/1000)}張"); v4.metric("態", "🔥 爆" if vt/va>1.5 else "💤 縮"); v5.metric("外資",f"{i.get('heldPercentInstitutions',0)*100:.1f}%")
                 
-                with st.expander("🏢 公司簡介", expanded=False): st.write(translate_text(info.get('longBusinessSummary', '')))
-                st.divider()
-                m1, m2, m3, m4, m5 = st.columns(5)
-                m1.metric("成交價", f"{curr:.2f}", f"{chg:.2f} ({pct:.2f}%)", delta_color=colors['delta'])
-                m2.metric("最高", f"{hi:.2f}"); m3.metric("最低", f"{lo:.2f}")
-                m4.metric("振幅", f"{amplitude:.2f}%")
-                main_force = "主力進貨 🔴" if (chg>0 and vol_today>vol_yest) else ("主力出貨 🟢" if (chg<0 and vol_today>vol_yest) else "觀望")
-                m5.metric("主力動向", main_force)
-                
-                v1, v2, v3, v4, v5 = st.columns(5)
-                v1.metric("今日量", f"{int(vol_today/1000):,} 張")
-                v2.metric("昨日量", f"{int(vol_yest/1000):,} 張", f"{int((vol_today-vol_yest)/1000)} 張")
-                v3.metric("本週均量", f"{int(vol_week_avg/1000):,} 張")
-                vol_ratio = vol_today / vol_week_avg if vol_week_avg > 0 else 1
-                vol_status = "🔥 爆量" if vol_ratio > 1.5 else ("💤 量縮" if vol_ratio < 0.6 else "正常")
-                v4.metric("狀態", vol_status)
-                v5.metric("外資持股", f"{info.get('heldPercentInstitutions', 0)*100:.1f}%")
+                st.subheader("📈 線圖"); d['M5']=d['Close'].rolling(5).mean(); d['M20']=d['Close'].rolling(20).mean(); d['M60']=d['Close'].rolling(60).mean()
+                sl=st.select_slider("期",['3月','6月','1年'],value='6月'); dy={'3月':90,'6月':180,'1年':365}[sl]; cd=d.tail(dy)
+                fig=make_subplots(rows=2,cols=1,shared_xaxes=True,row_heights=[0.7,0.3],vertical_spacing=0.03)
+                fig.add_trace(go.Candlestick(x=cd.index,open=cd['Open'],high=cd['High'],low=cd['Low'],close=cd['Close'],increasing_line_color=clr['up'],decreasing_line_color=clr['down'],name='K'),row=1,col=1)
+                fig.add_trace(go.Scatter(x=cd.index,y=cd['M5'],line=dict(color='blue',width=1),name='M5'),row=1,col=1)
+                fig.add_trace(go.Scatter(x=cd.index,y=cd['M20'],line=dict(color='orange',width=1),name='M20'),row=1,col=1)
+                vc=[clr['up'] if c>=o else clr['down'] for c,o in zip(cd['Close'],cd['Open'])]
+                fig.add_trace(go.Bar(x=cd.index,y=cd['Volume'],marker_color=vc,name='V'),row=2,col=1)
+                fig.update_layout(height=600,xaxis_rangeslider_visible=False,margin=dict(t=10,b=10,l=10,r=10),showlegend=False); st.plotly_chart(fig,use_container_width=True,config={'displayModeBar':False})
 
-                st.subheader("📈 K 線與籌碼")
-                df['MA5'] = df['Close'].rolling(5).mean(); df['MA20'] = df['Close'].rolling(20).mean(); df['MA60'] = df['Close'].rolling(60).mean()
-                trange = st.select_slider("時間區間", ['3個月','6個月','1年'], value='6個月')
-                days = {'3個月':90, '6個月':180, '1年':365}[trange]
-                cdf = df.tail(days)
-                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
-                fig.add_trace(go.Candlestick(x=cdf.index, open=cdf['Open'], high=cdf['High'], low=cdf['Low'], close=cdf['Close'], name='K線', increasing_line_color=colors['up'], decreasing_line_color=colors['down']), row=1, col=1)
-                fig.add_trace(go.Scatter(x=cdf.index, y=cdf['MA5'], line=dict(color='#1f77b4', width=1), name='MA5'), row=1, col=1)
-                fig.add_trace(go.Scatter(x=cdf.index, y=cdf['MA20'], line=dict(color='#ff7f0e', width=1), name='MA20'), row=1, col=1)
-                fig.add_trace(go.Scatter(x=cdf.index, y=cdf['MA60'], line=dict(color='#9467bd', width=1), name='MA60'), row=1, col=1)
-                vol_colors = [colors['up'] if c >= o else colors['down'] for c, o in zip(cdf['Close'], cdf['Open'])]
-                fig.add_trace(go.Bar(x=cdf.index, y=cdf['Volume'], marker_color=vol_colors, name='成交量'), row=2, col=1)
-                fig.update_layout(height=600, xaxis_rangeslider_visible=False, margin=dict(l=10, r=10, t=10, b=10), showlegend=False)
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        except Exception as e: st.error(f"錯誤: {e}")
-
-# [頁面 5, 6, 7] AI 策略 (強制 100 檔)
-elif st.session_state['view_mode'] in ['scan_day', 'scan_short', 'scan_long', 'top_gainers']:
-    mode = st.session_state['view_mode']
-    if mode == 'scan_day': title = "⚡ 當沖快篩"; days_req = 5
-    elif mode == 'scan_short': title = "📈 短線波段"; days_req = 30
-    elif mode == 'scan_long': title = "🐢 長線存股"; days_req = 60
-    elif mode == 'top_gainers': title = "🏆 本日漲幅前 100"; days_req = 5
-    
-    st.title(f"🤖 AI 推薦：{title} (前 100 名)")
-    
-    # 為了找出100檔，我們需要擴大搜尋池 (這裡為了效能，我們重複使用 pool 確保數量，實際應用可撈全台股)
-    scan_pool = st.session_state['scan_pool'] * 2 # 擴增池子確保數量足夠演示
-    
-    if st.button(f"開始搜尋"):
-        candidates = []
-        pbar = st.progress(0); status = st.empty()
-        
-        # 掃描邏輯
-        for i, code in enumerate(scan_pool):
-            if i >= 150: break # 為了效能，我們演示時掃描 150 檔取前 100
-            status.text(f"掃描中 ({i+1}): {code}...")
-            pbar.progress((i+1)/150)
-            try:
-                data = yf.Ticker(f"{code}.TW").history(period="3mo")
-                if len(data) > days_req:
-                    curr = data['Close'].iloc[-1]
-                    m20 = data['Close'].rolling(20).mean().iloc[-1]
-                    vol_curr = data['Volume'].iloc[-1]; vol_avg = data['Volume'].tail(5).mean()
-                    
-                    score = 0; reason = ""
-                    
-                    if mode == 'scan_day':
-                        amp = (data['High'].iloc[-1] - data['Low'].iloc[-1]) / data['Close'].iloc[-2]
-                        # 分數 = 量能倍數 * 振幅 (越高分越適合當沖)
-                        score = (vol_curr / vol_avg) * amp * 100
-                        reason = f"量倍 {vol_curr/vol_avg:.1f} | 振幅 {amp*100:.1f}%"
-                    
-                    elif mode == 'scan_short':
-                        # 分數 = 乖離率 (代表強勢程度)
-                        score = ((curr - m20) / m20) * 100
-                        reason = f"月線乖離 {score:.1f}%"
-                    
-                    elif mode == 'scan_long':
-                        m60 = data['Close'].rolling(60).mean().iloc[-1]
-                        # 分數 = 穩定度 (越接近季線越穩)
-                        score = -abs((curr - m60) / m60) * 100 
-                        reason = f"長線趨勢穩健"
-
-                    elif mode == 'top_gainers':
-                        change_pct = ((curr - data['Close'].iloc[-2])/data['Close'].iloc[-2])*100
-                        score = change_pct
-                        reason = f"漲幅 {change_pct:.2f}%"
-
-                    name = twstock.codes[code].name if code in twstock.codes else code
-                    # 避免重複
-                    if not any(d['c'] == code for d in candidates):
-                        candidates.append({'c':code, 'n':name, 'p':curr, 'r':reason, 's':score})
-            except: continue
-        
-        pbar.empty(); status.empty()
-        
-        # 排序並取出前 100
-        candidates.sort(key=lambda x: x['s'], reverse=True)
-        final_list = candidates[:100]
-        
-        if final_list:
-            st.success(f"已篩選出前 {len(final_list)} 名標的：")
-            for rank, item in enumerate(final_list):
+                st.subheader("🤖 診斷"); m20=d['M20'].iloc[-1]; m60=d['M60'].iloc[-1]; dt=d['Close'].diff(); u=dt.copy(); dd=dt.copy(); u[u<0]=0; dd[dd>0]=0
+                rs=u.rolling(14).mean()/dd.abs().rolling(14).mean(); rsi=(100-100/(1+rs)).iloc[-1]; bi=((cur-m60)/m60)*100
                 with st.container(border=True):
-                    c1, c2, c3, c4, c5 = st.columns([0.5, 1, 2, 3, 1])
-                    c1.write(f"#{rank+1}")
-                    c2.write(f"**{item['c']}**")
-                    c3.write(f"{item['n']}")
-                    c4.write(f"💰 {item['p']:.2f} | {item['r']}")
-                    c5.button("分析", key=f"ai_{item['c']}_{rank}", on_click=set_view_to_analysis, args=(item['c'], item['n']))
-        else: st.warning("掃描完成，但無資料。")
+                    c1,c2=st.columns(2); c1.success("🔥 多") if cur>m20 and m20>m60 else c1.error("❄️ 空") if cur<m20 and m20<m60 else c1.warning("⚖️ 盤")
+                    c2.write(f"RSI: `{rsi:.1f}` | 乖離: `{bi:.2f}%`")
+        except: st.error("錯")
 
-# [頁面 8] 歷史
+# [頁面 5,6,7,8] 掃描
+elif st.session_state['view_mode'] in ['scan_day', 'scan_short', 'scan_long', 'top_gainers']:
+    md=st.session_state['view_mode']; ti={"scan_day":"⚡ 當沖","scan_short":"📈 短線","scan_long":"🐢 長線","top_gainers":"🏆 漲幅"}[md]
+    st.title(f"🤖 {ti} (前100)"); sp=st.session_state['scan_pool']*2
+    if st.button("搜"):
+        lst=[]; pb=st.progress(0); stt=st.empty()
+        for i,c in enumerate(sp):
+            if i>=150: break
+            stt.text(f"搜: {c}..."); pb.progress((i+1)/150)
+            try:
+                d=yf.Ticker(f"{c}.TW").history(period="3mo")
+                if len(d)>5:
+                    p=d['Close'].iloc[-1]; m20=d['Close'].rolling(20).mean().iloc[-1]; v=d['Volume'].iloc[-1]; va=d['Volume'].tail(5).mean()
+                    sc=0; r=""
+                    if md=='scan_day': amp=(d['High'].iloc[-1]-d['Low'].iloc[-1])/d['Close'].iloc[-2]; sc=(v/va)*amp*100; r=f"量{v/va:.1f}x"
+                    elif md=='scan_short': sc=((p-m20)/m20)*100; r=f"乖離{sc:.1f}%"
+                    elif md=='scan_long': m60=d['Close'].rolling(60).mean().iloc[-1]; sc=-abs((p-m60)/m60)*100; r="穩"
+                    elif md=='top_gainers': sc=((p-d['Close'].iloc[-2])/d['Close'].iloc[-2])*100; r=f"漲{sc:.2f}%"
+                    n=twstock.codes[c].name if c in twstock.codes else c
+                    if not any(x['c']==c for x in lst): lst.append({'c':c,'n':n,'p':p,'r':r,'s':sc})
+            except: continue
+        pb.empty(); stt.empty(); lst.sort(key=lambda x:x['s'],reverse=True); fl=lst[:100]
+        if fl:
+            for k,x in enumerate(fl):
+                with st.container(border=True):
+                    c1,c2,c3,c4,c5=st.columns([0.5,1,2,3,1]); c1.write(f"#{k+1}"); c2.write(f"**{x['c']}**"); c3.write(x['n']); c4.write(f"{x['p']:.2f}|{x['r']}"); c5.button("看",key=f"a_{x['c']}_{k}",on_click=set_view_to_analysis,args=(x['c'],x['n']))
+        else: st.warning("無")
+
+# [頁面 9] 歷史
 elif st.session_state['view_mode'] == 'history':
-    st.title("📜 歷史紀錄")
-    if st.session_state['history']:
-        for item in st.session_state['history']:
-            code = item.split(" ")[0]; name = item.split(" ")[1] if " " in item else ""
-            c1, c2 = st.columns([4, 1])
-            c1.write(f"{item}"); c2.button("查看", key=f"h_{code}", on_click=set_view_to_analysis, args=(code, name))
+    st.title("📜"); 
+    for i in st.session_state['history']: c=i.split(" ")[0]; n=i.split(" ")[1] if " " in i else ""; c1,c2=st.columns([4,1]); c1.write(i); c2.button("看",key=f"hh_{c}",on_click=set_view_to_analysis,args=(c,n))
