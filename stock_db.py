@@ -7,13 +7,13 @@ import hashlib
 from datetime import datetime
 from deep_translator import GoogleTranslator
 
-# 檔案路徑設定
+# --- 檔案路徑設定 ---
 DB_USERS = "db_users.json"
 DB_WATCHLISTS = "db_watchlists.json"
 DB_HISTORY = "db_history.json"
 DB_COMMENTS = "db_comments.csv"
 
-# 策略專屬存檔 (V42 新增)
+# 策略專屬存檔路徑
 SCAN_FILES = {
     'day': 'db_scan_day.json',
     'short': 'db_scan_short.json',
@@ -21,7 +21,7 @@ SCAN_FILES = {
     'top': 'db_scan_top.json'
 }
 
-# --- 資料讀寫 ---
+# --- 資料讀寫基礎 ---
 def load_json(path, default):
     if not os.path.exists(path):
         with open(path, 'w') as f: json.dump(default, f)
@@ -33,14 +33,14 @@ def load_json(path, default):
 def save_json(path, data):
     with open(path, 'w') as f: json.dump(data, f)
 
-# --- 策略存取 (V42) ---
+# --- 策略結果存取 (V43) ---
 def save_scan_results(mode, results):
-    """儲存掃描結果 (包含排名資訊)"""
+    """儲存掃描結果代號清單"""
     if mode in SCAN_FILES:
         save_json(SCAN_FILES[mode], results)
 
 def load_scan_results(mode):
-    """讀取上次掃描結果"""
+    """讀取掃描結果代號清單"""
     if mode in SCAN_FILES:
         return load_json(SCAN_FILES[mode], [])
     return []
@@ -100,7 +100,7 @@ def get_comments():
         except: pass
     return pd.DataFrame(columns=["Time", "Nickname", "Message"])
 
-# --- 股票工具 (🔥 補回這些函式，解決 AttributeError) ---
+# --- 工具函式 ---
 def get_color_settings(stock_id):
     if ".TW" in stock_id.upper() or ".TWO" in stock_id.upper() or stock_id.isdigit():
         return {"up": "#FF0000", "down": "#00FF00", "delta": "inverse"}
@@ -114,13 +114,28 @@ def translate_text(text):
 def update_top_100():
     return True
 
-# --- 核心：只用 Yahoo (最穩定) ---
+# --- 雙引擎股票抓取 ---
 def get_stock_data(code):
+    # 1. Yahoo (優先)
     suffixes = ['.TW', '.TWO'] if code.isdigit() else ['']
     for s in suffixes:
         try:
             stock = yf.Ticker(f"{code}{s}")
             df = stock.history(period="3mo")
             if not df.empty: return f"{code}{s}", stock, df, "yahoo"
+        except: pass
+    
+    # 2. Twstock (備用)
+    if code.isdigit():
+        try:
+            rt = twstock.realtime.get(code)
+            if rt['success'] and rt['realtime']['latest_trade_price'] != '-':
+                info = rt['realtime']
+                return f"{code} (TWSE)", None, {
+                    'Close': float(info['latest_trade_price']),
+                    'High': float(info['high']),
+                    'Low': float(info['low']),
+                    'Volume': int(info['accumulate_trade_volume'])*1000 if info['accumulate_trade_volume'] else 0
+                }, "twse"
         except: pass
     return None, None, None, "fail"
