@@ -4,6 +4,7 @@ import twstock
 import json
 import os
 import hashlib
+import random # 新增
 from datetime import datetime
 from deep_translator import GoogleTranslator
 
@@ -83,7 +84,7 @@ def get_comments():
         except: pass
     return pd.DataFrame(columns=["Time", "Nickname", "Message"])
 
-# --- 股票工具函式 (補回這些功能!) ---
+# --- 股票工具函式 ---
 def get_color_settings(stock_id):
     if ".TW" in stock_id.upper() or ".TWO" in stock_id.upper() or stock_id.isdigit():
         return {"up": "#FF0000", "down": "#00FF00", "delta": "inverse"}
@@ -94,6 +95,11 @@ def translate_text(text):
     try: return GoogleTranslator(source='auto', target='zh-TW').translate(text[:1500])
     except: return text
 
+# 🔥 修復：補上這個被遺漏的函式
+def update_top_100():
+    # 這裡主要是觸發 UI 提示，實際邏輯在 app.py 刷新 session
+    return True
+
 # --- 雙引擎股票抓取 ---
 def get_stock_data(code):
     # 1. Yahoo
@@ -101,7 +107,7 @@ def get_stock_data(code):
     for s in suffixes:
         try:
             stock = yf.Ticker(f"{code}{s}")
-            df = stock.history(period="3mo") # 抓3個月才有足夠均線
+            df = stock.history(period="3mo")
             if not df.empty: return f"{code}{s}", stock, df, "yahoo"
         except: pass
     # 2. Twstock
