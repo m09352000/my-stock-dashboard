@@ -3,7 +3,7 @@ import time
 import twstock
 import pandas as pd
 
-# 🔥 引入我們做好的模組
+# 引入模組
 import stock_db as db
 import stock_ui as ui
 try:
@@ -12,7 +12,7 @@ except:
     STOCK_TERMS = {}; STRATEGY_DESC = "請建立 knowledge.py"
 
 # --- 設定 ---
-st.set_page_config(page_title="AI 股市戰情室 V29", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V30", layout="wide")
 
 # --- 初始化 State ---
 if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome'
@@ -66,10 +66,10 @@ with st.sidebar:
     if st.button("💬 留言板"): nav_to('chat'); st.rerun()
     
     st.divider()
-    if uid:
-        if st.button("登出"): st.session_state['user_id']=None; nav_to('welcome'); st.rerun()
+    if not uid:
+        if st.button("🔐 登入 / 註冊"): nav_to('login'); st.rerun()
     else:
-        if st.button("登入/註冊"): nav_to('login'); st.rerun()
+        if st.button("🚪 登出"): st.session_state['user_id']=None; nav_to('welcome'); st.rerun()
     
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
 
@@ -77,11 +77,11 @@ with st.sidebar:
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V29")
-    st.markdown("### 🚀 系統特色\n* **🔒 自選股獨立存檔**：資料絕對安全。\n* **📊 專業詳細診斷**：拒絕簡化，給您最完整的數據。\n* **🛡️ 雙引擎數據**：Yahoo + 證交所雙重保險。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V30")
+    st.markdown("### 🚀 系統特色\n* **🔒 資料安全**：自選股與歷史紀錄獨立存檔。\n* **📊 專業診斷**：恢復詳細數據儀表板，不再簡化。\n* **🛡️ 雙引擎數據**：Yahoo + 證交所雙重保險。")
 
 elif mode == 'login':
-    ui.render_header("🔐 會員登入")
+    ui.render_header("🔐 會員登入中心")
     t1, t2 = st.tabs(["登入", "註冊"])
     with t1:
         u = st.text_input("帳號"); p = st.text_input("密碼", type="password")
@@ -106,9 +106,8 @@ elif mode == 'watch':
         c1, c2 = st.columns([3,1]); add_c = c1.text_input("加股")
         if c2.button("加入") and add_c: db.update_watchlist(uid, add_c, "add"); st.rerun()
         
-        # 移除按鈕區
         if wl:
-            st.write("管理：")
+            st.write("管理清單：")
             cols = st.columns(8)
             for i, code in enumerate(wl):
                 if cols[i%8].button(f"❌ {code}"): db.update_watchlist(uid, code, "remove"); st.rerun()
@@ -122,7 +121,6 @@ elif mode == 'watch':
                     full_id, _, d, src = db.get_stock_data(code)
                     n = twstock.codes[code].name if code in twstock.codes else code
                     if d is not None:
-                        # 呼叫 ui.py 的詳細卡片函式
                         curr = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
                         if ui.render_detailed_card(code, n, curr, d, src):
                             nav_to('analysis', code, n); st.rerun()
@@ -135,7 +133,7 @@ elif mode == 'analysis':
     code = st.session_state['current_stock']
     name = st.session_state['current_name']
     
-    # 呼叫 ui.py 的 Header (含監控按鈕)
+    # 這裡只顯示標題與監控開關 (沒有上面的返回按鈕了)
     is_live = ui.render_header(f"{name} {code}", show_monitor=True)
     if is_live: time.sleep(3); st.rerun()
     
@@ -144,17 +142,33 @@ elif mode == 'analysis':
     if src == "fail":
         st.error("查無資料")
     elif src == "yahoo":
-        # 這裡的邏輯：把複雜的畫圖和計算都交給 ui.py
+        # 1. 計算所有詳細數據 (恢復 V28 的計算邏輯)
+        info = stock.info
+        curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]
+        chg = curr - prev; pct = (chg/prev)*100
+        vt = df['Volume'].iloc[-1]; vy = df['Volume'].iloc[-2]; va = df['Volume'].tail(5).mean()
+        high = df['High'].iloc[-1]; low = df['Low'].iloc[-1]
+        amp = ((high - low) / prev) * 100
+        mf = "主力進貨 🔴" if (chg>0 and vt>vy) else ("主力出貨 🟢" if (chg<0 and vt>vy) else "觀望")
+        vol_r = vt/va if va>0 else 1
+        vs = "🔥 爆量" if vol_r>1.5 else ("💤 量縮" if vol_r<0.6 else "正常")
+        fh = info.get('heldPercentInstitutions', 0)*100
+        
+        # 2. 顯示公司簡介
+        ui.render_company_profile(db.translate_text(info.get('longBusinessSummary','')))
+        
+        # 3. 呼叫 UI 顯示數據儀表板 (重點回歸！)
+        ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vt, vy, va, vs, fh, db.get_color_settings(code))
+        
+        # 4. 顯示圖表
         ui.render_chart(df, f"{name} K線圖")
         
-        curr = df['Close'].iloc[-1]
+        # 5. 計算 AI 指標並顯示報告
         m20 = df['Close'].rolling(20).mean().iloc[-1]
         m60 = df['Close'].rolling(60).mean().iloc[-1]
         delta = df['Close'].diff(); u=delta.copy(); d=delta.copy(); u[u<0]=0; d[d>0]=0
         rs = u.rolling(14).mean()/d.abs().rolling(14).mean(); rsi = (100-100/(1+rs)).iloc[-1]
         bias = ((curr-m60)/m60)*100
-        
-        # 呼叫 ui.py 的詳細報告
         ui.render_ai_report(curr, m20, m60, rsi, bias)
         
     elif src == "twse":
@@ -186,9 +200,9 @@ elif mode == 'chat':
     for i, r in df.iloc[::-1].iterrows(): st.info(f"{r['Nickname']} ({r['Time']}): {r['Message']}")
     ui.render_back_button(go_back)
 
-# 掃描頁面 (Day, Short, Long, Top)
-elif isinstance(mode, tuple) and mode[0] == 'scan': # nav_to('scan', 'type')
-    stype = st.session_state['current_stock'] # 借用存參數
+# 掃描頁面
+elif isinstance(mode, tuple) and mode[0] == 'scan': 
+    stype = mode[1] # 'day', 'short', 'long', 'top'
     ui.render_header(f"🤖 掃描結果: {stype}")
     
     if st.button("開始掃描 (前100)"):
@@ -204,17 +218,18 @@ elif isinstance(mode, tuple) and mode[0] == 'scan': # nav_to('scan', 'type')
                 fid, _, d, src = db.get_stock_data(c)
                 if d is not None and isinstance(d, pd.DataFrame) and len(d)>30:
                     p = d['Close'].iloc[-1]
-                    # 簡單範例邏輯 (你可以在這加強)
-                    if stype=='day' and d['Volume'].iloc[-1] > d['Volume'].mean()*1.5: res.append((c, p, "爆量"))
-                    elif stype=='short' and p > d['Close'].rolling(20).mean().iloc[-1]: res.append((c, p, "多頭"))
-                    elif stype=='top': res.append((c, p, "漲幅"))
+                    n = twstock.codes[c].name if c in twstock.codes else c
+                    # 簡單範例邏輯
+                    if stype=='day' and d['Volume'].iloc[-1] > d['Volume'].mean()*1.5: res.append((c, n, p))
+                    elif stype=='short' and p > d['Close'].rolling(20).mean().iloc[-1]: res.append((c, n, p))
+                    elif stype=='long' and p > d['Close'].rolling(60).mean().iloc[-1]: res.append((c, n, p))
+                    elif stype=='top': res.append((c, n, p))
             except: pass
         bar.empty()
         
-        # 顯示結果 (呼叫 ui.py 的卡片)
-        for c, p, r in res[:100]:
-            n = twstock.codes[c].name if c in twstock.codes else c
-            if ui.render_detailed_card(c, n, p, None, "twse"): # 列表用簡化顯示
+        # 顯示結果
+        for c, n, p in res[:100]:
+            if ui.render_detailed_card(c, n, p, None, "twse"): # 列表用簡化顯示(為效能)
                 nav_to('analysis', c, n); st.rerun()
                 
     ui.render_back_button(go_back)
