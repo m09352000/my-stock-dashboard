@@ -133,6 +133,7 @@ elif mode == 'watch':
                     n = twstock.codes[code].name if code in twstock.codes else code
                     if d is not None:
                         curr = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
+                        # 🔥 修復：加上 st.rerun() 確保按鈕點擊有反應
                         if ui.render_detailed_card(code, n, curr, d, src, key_prefix="watch"):
                             nav_to('analysis', code, n); st.rerun()
                     else: st.error(f"{code} 讀取失敗")
