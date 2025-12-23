@@ -12,7 +12,7 @@ except:
     STOCK_TERMS = {}; STRATEGY_DESC = "系統模組載入中..."
 
 # --- 設定 (必須第一行) ---
-st.set_page_config(page_title="AI 股市戰情室 V44", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V45", layout="wide")
 
 # --- 初始化 State ---
 defaults = {
@@ -30,25 +30,52 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# 初始化掃描池 (只做一次)
+# 初始化掃描池
 if not st.session_state['scan_pool']:
     try:
-        # 嘗試抓取上市股票代號
         st.session_state['scan_pool'] = sorted([c for c in twstock.codes.keys() if twstock.codes[c].type == "股票"])[:800]
     except:
-        st.session_state['scan_pool'] = ['2330', '2317', '2454', '2603', '2881', '3231', '2382']
+        st.session_state['scan_pool'] = ['2330', '2317', '2454', '2603', '2881']
 
-# --- 核心導航邏輯 ---
+# --- 核心邏輯：智慧代號解析 (V45 新增) ---
+def solve_stock_id(val):
+    """
+    輸入可以是代號 (2330) 或名稱 (台積電)，回傳 (代號, 名稱)
+    """
+    val = val.strip()
+    if not val: return None, None
+    
+    # 1. 直接是代號 (精確匹配)
+    if val in twstock.codes:
+        return val, twstock.codes[val].name
+        
+    # 2. 搜尋中文名稱 (優先找精確符合，例如輸入'鴻海')
+    for c, d in twstock.codes.items():
+        if d.type == "股票" and d.name == val:
+            return c, d.name
+            
+    # 3. 搜尋中文名稱 (模糊搜尋，例如輸入'台積' -> 找到'台積電')
+    # 為了避免雜訊，我們取第一個找到的
+    for c, d in twstock.codes.items():
+        if d.type == "股票" and val in d.name:
+            return c, d.name
+    
+    # 4. 判斷是否為美股 (全英文或數字但不在台股清單)
+    # 假設輸入 NVDA 或 TSLA
+    if val.replace('.','').isalnum():
+        return val.upper(), "美股/其他"
+        
+    return None, None
+
+# --- 導航函式 ---
 def nav_to(mode, code=None, name=None):
     if code:
         st.session_state['current_stock'] = code
         st.session_state['current_name'] = name
-        # 只有登入才記錄歷史
         if st.session_state['user_id']: 
             db.add_history(st.session_state['user_id'], f"{code} {name}")
     
     st.session_state['view_mode'] = mode
-    # 避免重複堆疊
     if st.session_state['page_stack'][-1] != mode:
         st.session_state['page_stack'].append(mode)
 
@@ -57,7 +84,6 @@ def go_back():
         st.session_state['page_stack'].pop()
         prev = st.session_state['page_stack'][-1]
         st.session_state['view_mode'] = prev
-        # 這裡不呼叫 rerun，讓 Streamlit 自然刷新，解決 callback 錯誤
     else:
         st.session_state['view_mode'] = 'welcome'
 
@@ -65,14 +91,15 @@ def handle_search():
     # 這是給 on_change 用的 callback
     raw = st.session_state.search_input_val
     if raw:
-        n = "美股"
-        if raw in twstock.codes: n = twstock.codes[raw].name
-        elif raw.isdigit(): n = "台股"
-        nav_to('analysis', raw, n)
-        # 清空輸入框內容 (選用)
-        st.session_state.search_input_val = ""
+        # 使用新的解析邏輯
+        code, name = solve_stock_id(raw)
+        if code:
+            nav_to('analysis', code, name)
+            st.session_state.search_input_val = "" # 清空
+        else:
+            st.toast(f"找不到 '{raw}' 相關股票", icon="⚠️")
 
-# --- Sidebar (依照要求排序) ---
+# --- Sidebar ---
 with st.sidebar:
     st.title("🎮 戰情控制台")
     uid = st.session_state['user_id']
@@ -81,9 +108,8 @@ with st.sidebar:
     
     st.divider()
     
-    # 1. 搜尋 (修正 Enter 問題)
-    st.text_input("🔍 輸入代號 (Enter 搜尋)", key="search_input_val", on_change=handle_search)
-    st.caption("支援台股代號 / 美股代號")
+    # 1. 搜尋 (支援中文)
+    st.text_input("🔍 搜尋 (代號/名稱)", key="search_input_val", on_change=handle_search, placeholder="例如: 2330 或 台積電")
 
     # 2. 策略按鈕
     st.subheader("🤖 AI 策略掃描")
@@ -116,7 +142,7 @@ with st.sidebar:
     
     st.divider()
     
-    # 4. 登入/登出 (放在回首頁上面)
+    # 4. 登入/登出
     if not uid:
         if st.button("🔐 登入 / 註冊"): nav_to('login'); st.rerun()
     else:
@@ -125,12 +151,11 @@ with st.sidebar:
             st.session_state['watch_active'] = False
             nav_to('welcome'); st.rerun()
             
-    # 5. 回首頁 (放在最下面)
+    # 5. 回首頁
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
 
-    # 6. 版本顯示 (左下角)
     st.markdown("---")
-    st.caption("Ver: 44.0.1 (Stable)")
+    st.caption("Ver: 45.0 (中文搜尋版)")
 
 # --- 主畫面路由 ---
 mode = st.session_state['view_mode']
@@ -138,10 +163,10 @@ mode = st.session_state['view_mode']
 if mode == 'welcome':
     ui.render_header("👋 歡迎來到 AI 股市戰情室")
     st.markdown("""
-    ### 🚀 V44 更新日誌
-    * **🎯 100 檔掃描**：強制顯示前 100 檔強勢股。
-    * **📊 專業分析**：新增多空關鍵價位與詳細綜合評述。
-    * **✨ 介面優化**：按鈕順序調整，修復搜尋功能。
+    ### 🚀 V45 更新：支援中文搜尋！
+    * **🔍 智慧搜尋**：現在您可以直接輸入 **「台積電」**、**「鴻海」** 或 **「長榮」** 進行分析。
+    * **📝 自選股優化**：新增自選股時，也支援輸入中文名稱。
+    * **✅ 穩定性提升**：核心代碼與 V44 保持一致，僅升級搜尋引擎。
     """)
 
 elif mode == 'login':
@@ -170,8 +195,18 @@ elif mode == 'watch':
     else:
         wl = db.get_watchlist(uid)
         c1, c2 = st.columns([3,1])
-        add_c = c1.text_input("新增自選股", placeholder="輸入代號")
-        if c2.button("加入") and add_c: db.update_watchlist(uid, add_c, "add"); st.rerun()
+        # 這裡也使用中文解析
+        add_c = c1.text_input("新增自選股", placeholder="輸入代號或名稱 (如: 緯創)")
+        
+        if c2.button("加入") and add_c: 
+            code, name = solve_stock_id(add_c)
+            if code:
+                db.update_watchlist(uid, code, "add")
+                st.toast(f"已加入: {name} ({code})", icon="✅")
+                time.sleep(0.5)
+                st.rerun()
+            else:
+                st.error(f"找不到股票: {add_c}")
         
         if wl:
             st.write("🗑️ 點擊移除：")
@@ -181,7 +216,6 @@ elif mode == 'watch':
             
             st.divider()
             
-            # 詳細診斷按鈕
             if st.button("🚀 啟動/刷新 AI 診斷 (可能需時幾秒)", use_container_width=True):
                 st.session_state['watch_active'] = True
                 st.rerun()
@@ -194,7 +228,6 @@ elif mode == 'watch':
                     
                     if d is not None:
                         curr = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
-                        # 傳入 src
                         if ui.render_detailed_card(code, n, curr, d, src, key_prefix="watch"):
                             nav_to('analysis', code, n); st.rerun()
                     else:
@@ -217,7 +250,6 @@ elif mode == 'analysis':
         curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]
         chg = curr - prev; pct = (chg/prev)*100
         vt = df['Volume'].iloc[-1]; vy = df['Volume'].iloc[-2]
-        # 避免除以零
         va = df['Volume'].tail(5).mean() + 1 
         high = df['High'].iloc[-1]; low = df['Low'].iloc[-1]
         amp = ((high - low) / prev) * 100
@@ -231,21 +263,16 @@ elif mode == 'analysis':
         ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vt, vy, va, vs, fh, color_settings)
         ui.render_chart(df, f"{name} K線圖", color_settings)
         
-        # AI 參數計算
         m5 = df['Close'].rolling(5).mean().iloc[-1]
         m20 = df['Close'].rolling(20).mean().iloc[-1]
         m60 = df['Close'].rolling(60).mean().iloc[-1]
-        
-        # RSI 計算
         delta = df['Close'].diff()
         u = delta.copy(); d = delta.copy()
         u[u<0]=0; d[d>0]=0
         rs = u.rolling(14).mean() / d.abs().rolling(14).mean()
         rsi = (100 - 100/(1+rs)).iloc[-1]
-        
         bias = ((curr-m60)/m60)*100
         
-        # 呼叫新版報告
         ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low)
         
     elif src == "twse":
@@ -253,6 +280,11 @@ elif mode == 'analysis':
         st.metric("現價", f"{df['Close']}")
         
     ui.render_back_button(go_back)
+
+# ... learn, chat, scan 區塊保持原樣 ...
+# 為了節省篇幅，這裡省略未變更的 learn, chat, scan 程式碼
+# 實際執行時，請保留原有的 scan/learn/chat 區塊
+# (若您是直接覆蓋，我把剩餘部分補完給您以防萬一)
 
 elif mode == 'learn':
     ui.render_header("📖 股市新手村")
@@ -272,16 +304,13 @@ elif mode == 'chat':
     if not st.session_state['user_id']: 
         st.warning("請先登入才能留言")
     else:
-        # 使用 Form 避免重複提交
         with st.form("msg_form"):
             m = st.text_input("留言內容")
             if st.form_submit_button("送出留言") and m: 
                 db.save_comment(st.session_state['user_id'], m)
                 st.rerun()
-                
     st.divider()
     df = db.get_comments()
-    # 顯示最新的 20 則
     for i, r in df.iloc[::-1].head(20).iterrows(): 
         st.info(f"**{r['Nickname']}** ({r['Time']}):\n{r['Message']}")
     ui.render_back_button(go_back)
@@ -303,23 +332,17 @@ elif mode == 'scan':
         raw_results = []
         bar = st.progress(0)
         pool = st.session_state['scan_pool']
-        # 擴大掃描範圍以確保能湊滿 100 檔
         limit = 400 
         
-        count = 0
         for i, c in enumerate(pool):
             if i >= limit: break
             bar.progress((i+1)/limit)
             try:
-                # 這裡不抓太長的歷史以加快速度
                 fid, _, d, src = db.get_stock_data(c)
-                
                 if d is not None:
                     n = twstock.codes[c].name if c in twstock.codes else c
                     p = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
-                    
-                    sort_val = 0
-                    info_txt = ""
+                    sort_val = 0; info_txt = ""
                     
                     if isinstance(d, pd.DataFrame) and len(d) > 20:
                         vol = d['Volume'].iloc[-1]
@@ -328,43 +351,27 @@ elif mode == 'scan':
                         prev = d['Close'].iloc[-2]
                         pct = ((p - prev) / prev) * 100
                         
-                        valid = True
-                        if stype == 'day':
-                            sort_val = vol; info_txt = f"量: {int(vol/1000)}張"
-                        elif stype == 'short':
-                            sort_val = (p - m5)/m5; info_txt = f"5日乖離: {sort_val*100:.1f}%"
-                        elif stype == 'long':
-                            sort_val = (p - m60)/m60; info_txt = f"季線乖離: {sort_val*100:.1f}%"
-                        elif stype == 'top':
-                            sort_val = pct; info_txt = f"漲幅: {pct:.2f}%"
+                        if stype == 'day': sort_val = vol; info_txt = f"量: {int(vol/1000)}張"
+                        elif stype == 'short': sort_val = (p - m5)/m5; info_txt = f"5日乖離: {sort_val*100:.1f}%"
+                        elif stype == 'long': sort_val = (p - m60)/m60; info_txt = f"季線乖離: {sort_val*100:.1f}%"
+                        elif stype == 'top': sort_val = pct; info_txt = f"漲幅: {pct:.2f}%"
                         
-                        if valid:
-                            raw_results.append({
-                                'c': c, 'n': n, 'p': p, 'd': d, 'src': src, 
-                                'val': sort_val, 'info': info_txt
-                            })
+                        raw_results.append({'c': c, 'n': n, 'p': p, 'd': d, 'src': src, 'val': sort_val, 'info': info_txt})
             except: pass
         bar.empty()
         
-        # 排序
         raw_results.sort(key=lambda x: x['val'], reverse=True)
-        # 修正：確保取前 100 檔
         top_100 = [x['c'] for x in raw_results[:100]]
         db.save_scan_results(stype, top_100)
-        
         st.session_state['scan_results'] = raw_results[:100]
         st.rerun() 
 
-    # 顯示邏輯
     display_list = st.session_state['scan_results']
     
     if not display_list and saved_codes:
         temp_list = []
-        # 讀取存檔時，為了效能，只抓前 100 檔的即時價
-        # 如果覺得卡頓，可以改為分頁顯示，這裡先一次載入
         placeholder = st.empty()
         placeholder.text("正在載入存檔數據...")
-        
         for i, c in enumerate(saved_codes[:100]):
              fid, _, d, src = db.get_stock_data(c)
              if d is not None:
@@ -375,7 +382,6 @@ elif mode == 'scan':
         placeholder.empty()
         
     if display_list:
-        # 使用 columns 呈現網格狀，比較整齊
         for i, item in enumerate(display_list):
             if ui.render_detailed_card(
                 item['c'], item['n'], item['p'], item['d'], item['src'], 
