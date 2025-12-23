@@ -18,7 +18,7 @@ def render_back_button(callback_func):
     if st.button("⬅️ 返回上一頁", use_container_width=True):
         callback_func()
 
-# --- 3. 新手村卡片 (修復版) ---
+# --- 3. 新手村卡片 ---
 def render_term_card(title, content):
     st.info(f"### {title}\n\n{content}")
 
@@ -45,25 +45,36 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     v4.metric("量能狀態", vol_status)
     v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 詳細診斷卡 (🔥 V42: 支援策略資訊顯示) ---
+# --- 6. 詳細診斷卡 (完整參數版) ---
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None, strategy_info=None):
-    # 預設
     status_color = "gray"
     trend_txt = "分析中"
     
-    # 排名文字
+    # 排名顯示
     display_name = f"#{rank} {name}" if rank else name
     
-    # 邏輯
-    if df is not None and not df.empty:
+    # 邏輯判斷
+    if df is not None:
         try:
-            curr = df['Close'].iloc[-1]
-            if len(df) > 20:
+            if source_type == "yahoo" and not df.empty and len(df) > 20:
+                curr = df['Close'].iloc[-1]
                 m20 = df['Close'].rolling(20).mean().iloc[-1]
-                if curr > m20: 
-                    trend_txt = "🔥 多頭"; status_color = "green"
-                else: 
-                    trend_txt = "❄️ 空頭"; status_color = "red"
+                m60 = df['Close'].rolling(60).mean().iloc[-1]
+                
+                if curr > m20 and m20 > m60: 
+                    trend_txt = "🔥 多頭排列"
+                    status_color = "green"
+                elif curr < m20 and m20 < m60: 
+                    trend_txt = "❄️ 空頭修正"
+                    status_color = "red"
+                elif curr > m20:
+                    trend_txt = "📈 站上月線"
+                    status_color = "orange"
+                else:
+                    trend_txt = "⚖️ 盤整震盪"
+            else:
+                trend_txt = "即時報價"
+                status_color = "blue"
         except: pass
 
     # 繪製
@@ -73,7 +84,7 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
         c2.markdown(f"**{display_name}**")
         c3.metric("現價", f"{price:.2f}")
         
-        # 顯示策略關鍵數據 (如: 成交量、漲幅)
+        # 顯示策略資訊
         if strategy_info:
             c4.markdown(f"**{strategy_info}**")
         else:
@@ -94,19 +105,36 @@ def render_chart(df, title):
     fig.update_layout(height=600, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 8. AI 報告 ---
+# --- 8. AI 報告 (🔥 修復 SyntaxError：改成標準縮排) ---
 def render_ai_report(curr, m20, m60, rsi, bias):
     st.subheader("🤖 AI 深度診斷報告")
     c1, c2, c3 = st.columns(3)
+    
     with c1:
         st.info("📈 **趨勢研判**")
-        if curr > m20: st.markdown("### 🔥 強勢多頭"); st.write("股價站穩月線之上。")
-        else: st.markdown("### ❄️ 弱勢整理"); st.write("股價跌破月線。")
+        if curr > m20:
+            st.markdown("### 🔥 強勢多頭")
+            st.write("股價站穩月線之上，多方控盤。")
+        else:
+            st.markdown("### ❄️ 弱勢整理")
+            st.write("股價跌破月線，上方有壓。")
+            
     with c2:
         st.warning("⚡ **動能 (RSI)**")
         st.metric("數值", f"{rsi:.1f}")
-        if rsi > 80: st.write("⚠️ 過熱"); elif rsi < 20: st.write("💎 超賣"); else: st.write("✅ 中性")
+        if rsi > 80:
+            st.write("⚠️ 過熱警示")
+        elif rsi < 20:
+            st.write("💎 超賣訊號")
+        else:
+            st.write("✅ 動能中性")
+            
     with c3:
         st.error("📏 **乖離率**")
         st.metric("數值", f"{bias:.2f}%")
-        if bias > 20: st.write("⚠️ 正乖離大"); elif bias < -20: st.write("💎 負乖離大"); else: st.write("✅ 正常")
+        if bias > 20:
+            st.write("⚠️ 正乖離過大")
+        elif bias < -20:
+            st.write("💎 負乖離過大")
+        else:
+            st.write("✅ 乖離正常")
