@@ -92,14 +92,12 @@ def translate_text(text):
     try: return GoogleTranslator(source='auto', target='zh-TW').translate(text[:1500])
     except: return text
 
-# 🔥 補上這個函式，解決左側按鈕紅字
 def update_top_100():
-    # 這裡主要是觸發 UI 提示，實際資料更新依賴 get_stock_data
     return True
 
-# --- 雙引擎股票抓取 ---
+# --- 雙引擎股票抓取 (V36 強健版) ---
 def get_stock_data(code):
-    # 1. Yahoo (優先嘗試)
+    # 1. Yahoo (優先)
     suffixes = ['.TW', '.TWO'] if code.isdigit() else ['']
     for s in suffixes:
         try:
@@ -108,7 +106,7 @@ def get_stock_data(code):
             if not df.empty: return f"{code}{s}", stock, df, "yahoo"
         except: pass
     
-    # 2. Twstock (備用)
+    # 2. Twstock (備用) - 增加容錯
     if code.isdigit():
         try:
             rt = twstock.realtime.get(code)
