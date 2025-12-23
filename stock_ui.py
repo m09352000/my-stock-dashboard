@@ -18,14 +18,9 @@ def render_back_button(callback_func):
     if st.button("⬅️ 返回上一頁", use_container_width=True):
         callback_func()
 
-# --- 3. 新手村專用：精美卡片渲染 (🔥 V34 新增) ---
+# --- 3. 新手村美化卡片 (修復醜醜排版) ---
 def render_term_card(title, content):
-    st.markdown(f"""
-    <div class="term-card">
-        <div class="term-title">{title}</div>
-        <div class="term-content">{content}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.info(f"### {title}\n\n{content}")
 
 # --- 4. 公司簡介 ---
 def render_company_profile(summary):
