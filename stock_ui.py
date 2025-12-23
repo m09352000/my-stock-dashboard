@@ -33,6 +33,7 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              color_settings):
     m1, m2, m3, m4, m5 = st.columns(5)
+    # delta_color=inverse 代表 紅漲綠跌 (台股模式)
     m1.metric("成交價", f"{curr:.2f}", f"{chg:.2f} ({pct:.2f}%)", delta_color=color_settings['delta'])
     m2.metric("最高價", f"{high:.2f}")
     m3.metric("最低價", f"{low:.2f}")
@@ -45,15 +46,13 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     v4.metric("量能狀態", vol_status)
     v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 詳細診斷卡 (完整參數版) ---
+# --- 6. 詳細診斷卡 ---
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None, strategy_info=None):
     status_color = "gray"
     trend_txt = "分析中"
     
-    # 排名顯示
     display_name = f"#{rank} {name}" if rank else name
     
-    # 邏輯判斷
     if df is not None:
         try:
             if source_type == "yahoo" and not df.empty and len(df) > 20:
@@ -77,14 +76,12 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
                 status_color = "blue"
         except: pass
 
-    # 繪製
     with st.container(border=True):
         c1, c2, c3, c4, c5 = st.columns([1, 1.5, 2, 2.5, 1])
         c1.markdown(f"### {code}")
         c2.markdown(f"**{display_name}**")
         c3.metric("現價", f"{price:.2f}")
         
-        # 顯示策略資訊
         if strategy_info:
             c4.markdown(f"**{strategy_info}**")
         else:
@@ -92,49 +89,49 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
             
         return c5.button("詳細分析", key=f"{key_prefix}_{code}")
 
-# --- 7. K線圖 ---
-def render_chart(df, title):
+# --- 7. K線圖 (🔥 V44: 支援動態顏色) ---
+def render_chart(df, title, color_settings):
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
+    
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.03)
-    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K線'), row=1, col=1)
+    
+    # 1. 繪製 K 線 (使用傳入的顏色設定)
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], 
+        name='K線',
+        increasing_line_color=color_settings['up'],   # 漲的顏色
+        decreasing_line_color=color_settings['down']  # 跌的顏色
+    ), row=1, col=1)
+    
+    # 2. 均線
     fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], line=dict(color='blue', width=1), name='MA5'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='orange', width=1), name='MA20'), row=1, col=1)
-    colors = ['red' if c >= o else 'green' for c, o in zip(df['Close'], df['Open'])]
-    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=2, col=1)
+    
+    # 3. 成交量 (顏色也要對應)
+    # 漲(收>=開)用 up 色，跌用 down 色
+    vol_colors = [color_settings['up'] if c >= o else color_settings['down'] for c, o in zip(df['Close'], df['Open'])]
+    
+    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=vol_colors, name='成交量'), row=2, col=1)
+    
     fig.update_layout(height=600, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 8. AI 報告 (🔥 修復 SyntaxError：改成標準縮排) ---
+# --- 8. AI 報告 ---
 def render_ai_report(curr, m20, m60, rsi, bias):
     st.subheader("🤖 AI 深度診斷報告")
     c1, c2, c3 = st.columns(3)
-    
     with c1:
         st.info("📈 **趨勢研判**")
         if curr > m20:
-            st.markdown("### 🔥 強勢多頭")
-            st.write("股價站穩月線之上，多方控盤。")
+            st.markdown("### 🔥 強勢多頭"); st.write("股價站穩月線之上。")
         else:
-            st.markdown("### ❄️ 弱勢整理")
-            st.write("股價跌破月線，上方有壓。")
-            
+            st.markdown("### ❄️ 弱勢整理"); st.write("股價跌破月線。")
     with c2:
         st.warning("⚡ **動能 (RSI)**")
         st.metric("數值", f"{rsi:.1f}")
-        if rsi > 80:
-            st.write("⚠️ 過熱警示")
-        elif rsi < 20:
-            st.write("💎 超賣訊號")
-        else:
-            st.write("✅ 動能中性")
-            
+        if rsi > 80: st.write("⚠️ 過熱"); elif rsi < 20: st.write("💎 超賣"); else: st.write("✅ 中性")
     with c3:
         st.error("📏 **乖離率**")
         st.metric("數值", f"{bias:.2f}%")
-        if bias > 20:
-            st.write("⚠️ 正乖離過大")
-        elif bias < -20:
-            st.write("💎 負乖離過大")
-        else:
-            st.write("✅ 乖離正常")
+        if bias > 20: st.write("⚠️ 正乖離大"); elif bias < -20: st.write("💎 負乖離大"); else: st.write("✅ 正常")
