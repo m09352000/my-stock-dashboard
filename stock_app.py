@@ -8,15 +8,21 @@ import subprocess
 import os
 from PIL import Image, ImageOps, ImageEnhance
 import pytesseract
+import importlib # V65 新增：用來強制更新模組
 
 import stock_db as db
 import stock_ui as ui
+
+# --- V65 關鍵修改：強制重新載入 knowledge.py ---
+# 這樣您修改新手村內容後，網頁才會同步更新
 try:
+    import knowledge
+    importlib.reload(knowledge) 
     from knowledge import STOCK_TERMS, STRATEGY_DESC
 except:
-    STOCK_TERMS = {}; STRATEGY_DESC = "系統載入中..."
+    STOCK_TERMS = {}; STRATEGY_DESC = "系統載入中... (請確認 knowledge.py 是否存在)"
 
-st.set_page_config(page_title="AI 股市戰情室 V64", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V65", layout="wide")
 
 defaults = {
     'view_mode': 'welcome', 'user_id': None, 'page_stack': ['welcome'],
@@ -137,17 +143,17 @@ with st.sidebar:
     else:
         if st.button("🚪 登出系統"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 64.0 (清晰對齊版)")
+    st.markdown("---"); st.caption("Ver: 65.0 (自動熱更新版)")
 
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V64")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V65")
     st.markdown("""
-    ### 🚀 V64 更新：清晰對齊與排版優化
-    * **👀 視覺優化**：修復文字被切斷問題，字體加粗更清晰。
-    * **📐 完美對齊**：所有建議與數值皆垂直置中，閱讀不費力。
-    * **📝 內容完整**：保留所有進出場建議，並以更直觀的方式呈現。
+    ### 🚀 V65 更新：知識庫熱更新系統
+    * **📚 新手村擴充**：支援動態載入最新的股市名詞與策略說明。
+    * **🔄 自動重載**：修改 `knowledge.py` 後無需重啟，立即生效。
+    * **🛠️ 系統優化**：全中文化介面與 OCR 引擎整合。
     """)
     c1, c2 = st.columns(2)
     with c1:
@@ -230,7 +236,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V64)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V65)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
@@ -338,7 +344,7 @@ elif mode == 'scan':
 
                         valid = False
                         
-                        # V62 邏輯：放寬標準，改用排序法，確保找出至少 20 檔
+                        # V62 邏輯 (保留)
                         if stype == 'day': 
                             if vol > vol_prev and p >= d['Open'].iloc[-1]:
                                 sort_val = vol 
@@ -365,7 +371,6 @@ elif mode == 'scan':
             except: pass
         bar.empty()
         
-        # 取前 50 名 (確保至少有 20 檔)
         raw_results.sort(key=lambda x: x['val'], reverse=True)
         top_50 = [x['c'] for x in raw_results[:50]]
         db.save_scan_results(stype, top_50)
@@ -374,7 +379,7 @@ elif mode == 'scan':
     display_list = st.session_state['scan_results']
     if not display_list and not do_scan and saved_codes and target_group == "🔍 全部上市櫃":
          temp_list = []
-         for i, c in enumerate(saved_codes[:50]): # 讀取前 50 檔
+         for i, c in enumerate(saved_codes[:50]):
              fid, _, d, src = db.get_stock_data(c)
              if d is not None:
                  p = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
