@@ -4,7 +4,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from datetime import datetime
 
-# --- CSS: 排版微調 ---
+# --- CSS: V72 視覺強化版 ---
 def inject_custom_css():
     st.markdown("""
         <style>
@@ -13,25 +13,38 @@ def inject_custom_css():
             font-size: 1.1rem !important; font-weight: bold;
         }
         .action-list ul { padding-left: 1.2rem !important; margin-bottom: 0rem !important; }
-        .action-list li { margin-bottom: 0.3rem !important; line-height: 1.5 !important; }
+        .action-list li { margin-bottom: 0.3rem !important; line-height: 1.6 !important; font-size: 1rem !important; }
+        
         div[data-testid="stVerticalBlock"] > div { padding-top: 0.1rem; padding-bottom: 0.1rem; gap: 0.3rem; }
         button { height: auto !important; padding-top: 0.2rem !important; padding-bottom: 0.2rem !important; }
         div[data-testid="stMetricValue"] { font-size: 1.25rem !important; font-weight: 700 !important; }
         div[data-testid="stMetricLabel"] { font-size: 0.9rem !important; color: #d0d0d0 !important; }
         hr.compact { margin: 8px 0px !important; border: 0; border-top: 1px solid #444; }
-        .term-content p { font-size: 1rem !important; line-height: 1.6 !important; margin-bottom: 0.5rem !important; }
         .live-tag { color: #00FF00; font-weight: bold; font-size: 0.9rem; animation: blink 2s infinite; }
         @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-        /* V71 新增: K線戰法文字樣式 */
-        .strategy-box {
-            background-color: #262730;
-            border-left: 5px solid #FF4B4B;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 10px;
+        
+        /* V72 新增: 戰略報告專用樣式 */
+        .bull-box {
+            background-color: #2e1a1a; /* 深紅底 */
+            border-left: 6px solid #FF2B2B;
+            padding: 15px; border-radius: 8px; margin-bottom: 10px;
         }
-        .strategy-title { font-size: 1.2rem; font-weight: bold; color: #FFF; margin-bottom: 10px; }
-        .strategy-text { font-size: 1rem; color: #DDD; line-height: 1.6; }
+        .bear-box {
+            background-color: #1a2e1a; /* 深綠底 */
+            border-left: 6px solid #00E050;
+            padding: 15px; border-radius: 8px; margin-bottom: 10px;
+        }
+        .neutral-box {
+            background-color: #262730;
+            border-left: 6px solid #888;
+            padding: 15px; border-radius: 8px; margin-bottom: 10px;
+        }
+        .strategy-title { 
+            font-size: 1.4rem; font-weight: 900; margin-bottom: 10px; display: block;
+        }
+        .strategy-text { font-size: 1.05rem; color: #EEE; line-height: 1.7; }
+        .highlight-red { color: #FF4B4B; font-weight: bold; font-size: 1.1rem; }
+        .highlight-green { color: #00E050; font-weight: bold; font-size: 1.1rem; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -49,7 +62,7 @@ def render_header(title, show_monitor=False):
             now_time = datetime.now().strftime("%H:%M:%S")
             st.markdown(f"<span class='live-tag'>● LIVE 連線中 | 最後更新: {now_time}</span>", unsafe_allow_html=True)
         else:
-            st.caption("資料來源: Yahoo Finance / TWSE | V71 K線戰略版")
+            st.caption("資料來源: Yahoo Finance / TWSE | V72 多K線戰法版")
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
     return is_live
 
@@ -67,7 +80,7 @@ def render_term_card(title, content):
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         st.markdown(f"<div class='term-content'>{content}</div>", unsafe_allow_html=True)
 
-# --- K線型態繪圖 (新手村用) ---
+# --- K線型態繪圖 ---
 def render_kline_pattern_card(title, pattern_data):
     morph = pattern_data.get('morphology', '無資料')
     psycho = pattern_data.get('psychology', '無資料')
@@ -98,7 +111,7 @@ def render_company_profile(summary):
         with st.expander("🏢 公司簡介與業務", expanded=False):
             st.write(summary)
 
-# --- 5. 儀表板 (V71: 新增週轉率) ---
+# --- 5. 儀表板 ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              turnover_rate, color_settings):
@@ -113,13 +126,12 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         v1, v2, v3, v4, v5 = st.columns(5)
         v1.metric("今日量 (Vol)", f"{int(vol/1000):,} 張")
         
-        # 處理週轉率顯示
         t_label = "正常"
-        if turnover_rate > 20: t_label = "過熱 (Hot!)"
+        if turnover_rate > 20: t_label = "🔥 過熱"
         elif turnover_rate > 10: t_label = "熱絡"
-        elif turnover_rate < 0.5: t_label = "冷門"
+        elif turnover_rate < 0.5: t_label = "❄️ 冷門"
         
-        v2.metric("週轉率 (Turnover)", f"{turnover_rate:.2f}%", t_label) # V71 新增
+        v2.metric("週轉率 (Turnover)", f"{turnover_rate:.2f}%", t_label)
         v3.metric("五日均量 (Avg)", f"{int(vol_avg/1000):,} 張")
         v4.metric("量能狀態", vol_status)
         v5.metric("外資持股", f"{foreign_held:.1f}%")
@@ -250,73 +262,113 @@ def render_chart(df, title, color_settings):
     fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=10, b=10), showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
 
-# --- V71: 核心 K線型態數學計算引擎 ---
-def analyze_latest_candle(df):
+# --- V72: 核心 K線型態數學計算引擎 (5日版) ---
+def analyze_multi_candle_patterns(df):
     """
-    計算最後一根 K 線的型態，並給出詳細戰略建議
+    計算最後 3-5 根 K 線的型態，並給出詳細戰略建議
     """
-    if df is None or len(df) < 2: return "資料不足", "無法分析"
+    if df is None or len(df) < 5: return "資料盤整", "K線數據不足 5 日，無法進行完整型態分析。", "neutral"
     
-    # 取得最新資料
-    c = df.iloc[-1]
-    prev_c = df.iloc[-2]
+    # 取得最近 5 日資料
+    c1 = df.iloc[-1] # 今天
+    c2 = df.iloc[-2] # 昨天
+    c3 = df.iloc[-3] # 前天
+    c4 = df.iloc[-4]
+    c5 = df.iloc[-5]
     
-    open_p = c['Open']
-    high_p = c['High']
-    low_p = c['Low']
-    close_p = c['Close']
+    # 輔助函式
+    def is_red(c): return c['Close'] > c['Open']
+    def is_green(c): return c['Close'] < c['Open']
+    def body(c): return abs(c['Close'] - c['Open'])
+    def upper(c): return c['High'] - max(c['Close'], c['Open'])
+    def lower(c): return min(c['Close'], c['Open']) - c['Low']
     
-    # 基礎計算
-    body = abs(close_p - open_p) # 實體長度
-    upper_shadow = high_p - max(close_p, open_p) # 上影線
-    lower_shadow = min(close_p, open_p) - low_p # 下影線
-    total_len = high_p - low_p # 總長度
+    title = "盤整待變 (Consolidation)"
+    advice = "近期 K 線排列無明顯強勢反轉訊號，多空力道均衡。建議先觀望，等待突破區間後再順勢操作。"
+    box_class = "neutral-box"
     
-    # 顏色判斷
-    is_red = close_p > open_p
-    is_long = body > (prev_c['Close'] * 0.03) # 實體大於3%算長
+    # --- 3根 K線型態 (強度高) ---
     
-    title = "盤整小K線"
-    advice = """
-    **【型態解讀】** 目前 K 線實體較小，代表多空雙方力道均衡，市場處於觀望或盤整狀態。<br>
-    **【操作建議】** 建議暫時觀望，等待出現明顯的長紅或長黑突破後再順勢操作。
-    """
-    
-    # 型態判讀邏輯
-    if is_red and is_long:
-        title = "🔥 長紅攻擊 (Strong Bull)"
+    # 1. 晨星 (Morning Star) - 多方
+    # c3長綠, c2小實體缺口, c1長紅且收過c3中點
+    if is_green(c3) and body(c3) > c3['Open']*0.015 and \
+       body(c2) < body(c3)*0.4 and \
+       is_red(c1) and c1['Close'] > (c3['Open'] + c3['Close'])/2:
+        title = "🌅 晨星轉折 (Morning Star)"
+        box_class = "bull-box"
         advice = f"""
-        **【型態解讀】** 收盤價遠高於開盤價 (漲幅實體大)，顯示買盤力道強勁，多方完全掌控局面。若伴隨成交量放大，代表主力強勢表態。<br>
-        **【實戰建議】** <span style='color:#FF2B2B'><b>偏多操作</b></span>。只要股價回測不跌破這根紅棒的實體一半 ({ (open_p+close_p)/2:.2f} )，皆可視為強勢整理，可偏多佈局。
-        """
-    elif not is_red and is_long:
-        title = "❄️ 長黑貫穿 (Strong Bear)"
-        advice = f"""
-        **【型態解讀】** 收盤價遠低於開盤價，顯示賣壓沉重，空方勢力龐大。高檔出現此訊號通常是主力出貨的前兆。<br>
-        **【實戰建議】** <span style='color:#00E050'><b>偏空看待</b></span>。近期壓力沈重，反彈若無法站回這根黑棒的開盤價 ({open_p:.2f})，應減碼或離場觀望。
-        """
-    elif lower_shadow > (body * 2) and upper_shadow < body:
-        title = "🔨 錘頭/探底針 (Hammer)"
-        advice = f"""
-        **【型態解讀】** 盤中雖一度大跌，但低檔買盤湧入將股價推回。留下了長長的下影線，代表低檔有強力支撐。<br>
-        **【實戰建議】** 若出現在下跌波段低檔，為止跌訊號。可嘗試在下影線低點 ({low_p:.2f}) 設為停損點進行 <span style='color:#FF2B2B'><b>搶反彈</b></span>。但若在高檔出現，則可能是「上吊線」，需小心誘多。
-        """
-    elif upper_shadow > (body * 2) and lower_shadow < body:
-        title = "☄️ 流星/避雷針 (Shooting Star)"
-        advice = f"""
-        **【型態解讀】** 盤中試圖衝高但遭遇強大賣壓，收盤被打回原形。留下了長長的上影線，代表上方套牢賣壓沈重。<br>
-        **【實戰建議】** <span style='color:#00E050'><b>逢高調節</b></span>。上方高點 ({high_p:.2f}) 已形成短期天花板，若無法帶量突破，股價容易回測。
-        """
-    elif body < (total_len * 0.1): # 實體極小
-        title = "⚖️ 十字變盤線 (Doji)"
-        advice = """
-        **【型態解讀】** 開盤價與收盤價幾乎相同，代表多空力道勢均力敵，市場迷惘，即將出現轉折。<br>
-        **【實戰建議】** 變盤訊號！需觀察**隔日開盤**。若隔日開高走高，則視為中繼再漲；若隔日開低走低，則趨勢可能反轉向下。建議等待方向確認後再動作。
+        **【型態識別】** 在跌勢中出現「長綠 + 小星 + 長紅」的組合。c1 長紅棒強勢反攻，收復 c3 長綠棒一半失土，顯示空方力竭，多方正式接管戰場。<br>
+        **【操作建議】** <span class='highlight-red'>強力買進訊號</span>。這是一個勝率極高的波段起漲點。
+        <ul>
+            <li><b>進場</b>：今日尾盤或隔日開盤直接進場。</li>
+            <li><b>停損</b>：以中間那顆星星的最低點 ({c2['Low']:.2f}) 為防守點。</li>
+        </ul>
         """
         
-    return title, advice
+    # 2. 夜星 (Evening Star) - 空方
+    # c3長紅, c2小實體缺口, c1長綠且跌破c3中點
+    elif is_red(c3) and body(c3) > c3['Open']*0.015 and \
+         body(c2) < body(c3)*0.4 and c2['Open'] > c3['Close'] and \
+         is_green(c1) and c1['Close'] < (c3['Open'] + c3['Close'])/2:
+        title = "🌃 夜星及頂 (Evening Star)"
+        box_class = "bear-box"
+        advice = f"""
+        **【型態識別】** 在漲勢中出現「長紅 + 小星 + 長綠」的組合。c1 長綠棒一舉吞噬多方成果，上方形成孤島套牢區。<br>
+        **【操作建議】** <span class='highlight-green'>強烈賣出訊號</span>。多頭攻勢已盡，建議立即獲利了結或反手放空。
+        <ul>
+            <li><b>離場</b>：今日收盤前務必減碼。</li>
+            <li><b>停損</b>：空單停損設在星星最高點 ({c2['High']:.2f})。</li>
+        </ul>
+        """
 
-# --- 9. AI 報告 (V71: 新增 K線型態戰法 分頁) ---
+    # 3. 紅三兵 (Three White Soldiers) - 多方
+    elif is_red(c3) and is_red(c2) and is_red(c1) and \
+         c1['Close'] > c2['Close'] > c3['Close'] and \
+         c1['Close'] > c1['Open'] and c2['Close'] > c2['Open']: # 實體要夠
+        title = "💂‍♂️ 紅三兵 (Three White Soldiers)"
+        box_class = "bull-box"
+        advice = f"""
+        **【型態識別】** 連續三根紅 K 棒穩步上攻，收盤價一天比一天高。代表多頭部隊集結完畢，賣壓已被逐日消化。<br>
+        **【操作建議】** <span class='highlight-red'>趨勢確立</span>。這是波段漲勢的開端，不要因為覺得漲了三天就不敢買。
+        <ul>
+            <li><b>進場</b>：拉回測試 5日線不破時加碼。</li>
+            <li><b>防守</b>：第一根紅棒的低點 ({c3['Low']:.2f}) 不破，多頭趨勢不變。</li>
+        </ul>
+        """
+
+    # --- 2根 K線型態 ---
+    
+    # 4. 多頭吞噬 (Bullish Engulfing)
+    elif is_green(c2) and is_red(c1) and \
+         c1['Close'] > c2['Open'] and c1['Open'] < c2['Close']:
+        title = "🐲 多頭吞噬 (Bullish Engulfing)"
+        box_class = "bull-box"
+        advice = f"""
+        **【型態識別】** 今日長紅棒的實體完全包覆住昨日的綠棒。代表多方以壓倒性力量扭轉局勢，將昨日賣壓全數吃掉。<br>
+        **【操作建議】** <span class='highlight-red'>偏多操作</span>。底部出現此訊號為極佳買點。
+        <ul>
+            <li><b>進場</b>：可於今日收盤確認時試單。</li>
+            <li><b>防守</b>：今日長紅低點 ({c1['Low']:.2f}) 為絕對支撐。</li>
+        </ul>
+        """
+
+    # --- 1根 K線 (但參考前幾日) ---
+    
+    # 5. 錘頭線 (Hammer) - 需在相對低檔
+    elif lower(c1) > body(c1)*2 and upper(c1) < body(c1) and c1['Low'] < c2['Low'] and c1['Low'] < c3['Low']:
+        title = "🔨 錘頭止跌 (Hammer)"
+        box_class = "bull-box"
+        advice = f"""
+        **【型態識別】** 創近期新低後留下長下影線，代表低檔有強力買盤支撐，空方力道被化解。<br>
+        **【操作建議】** <span class='highlight-red'>嘗試搶反彈</span>。但需等待明日收紅 K 確認不再破底。
+        <ul>
+            <li><b>防守</b>：下影線最低點 ({c1['Low']:.2f}) 是生死線，跌破需停損。</li>
+        </ul>
+        """
+        
+    return title, advice, box_class
+
+# --- 9. AI 報告 (V72: 呼叫 5日K線引擎) ---
 def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df=None):
     st.subheader("🤖 AI 戰略分析報告")
     pivot = (high + low + curr) / 3
@@ -353,12 +405,13 @@ def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df=None):
         cp3.metric("支撐位 (S1)", f"{s1:.2f}", help="預估下方第一道支撐")
         
     with t3:
-        # V71: 這裡進行即時 K 線分析
+        # V72: 呼叫新的 5日 K線分析引擎
         if df is not None:
-            pattern_title, pattern_advice = analyze_latest_candle(df)
+            pattern_title, pattern_advice, box_class = analyze_multi_candle_patterns(df)
+            # 使用自定義 CSS class 渲染彩色區塊
             st.markdown(f"""
-            <div class='strategy-box'>
-                <div class='strategy-title'>{pattern_title}</div>
+            <div class='{box_class}'>
+                <span class='strategy-title'>{pattern_title}</span>
                 <div class='strategy-text'>{pattern_advice}</div>
             </div>
             """, unsafe_allow_html=True)
