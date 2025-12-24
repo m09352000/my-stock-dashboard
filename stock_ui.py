@@ -3,50 +3,42 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 
-# --- CSS: V64 對齊與清晰度優化 ---
+# --- CSS: V66 排版微調 ---
 def inject_custom_css():
     st.markdown("""
         <style>
-        /* 1. 調整容器間距 (稍微放寬以防切字) */
+        /* 容器間距 */
         div[data-testid="stVerticalBlock"] > div {
-            gap: 0.3rem !important;
+            padding-top: 0.1rem;
+            padding-bottom: 0.1rem;
+            gap: 0.4rem;
         }
-        
-        /* 2. 卡片內部邊距 */
-        div[data-testid="stVerticalBlockBorderWrapper"] {
-            padding: 10px 15px !important;
+        /* 按鈕樣式 */
+        button {
+            height: auto !important;
+            padding: 2px 10px !important;
+            font-size: 0.85rem !important;
         }
-        
-        /* 3. 強制垂直置中與字體清晰化 */
-        .stMarkdown p {
-            font-size: 1rem !important;
-            line-height: 1.5 !important; /* 修正字體被切掉的問題 */
-            margin-bottom: 0px !important;
-            display: flex;
-            align-items: center; /* 垂直置中核心 */
-        }
-        
-        /* 4. 數據指標優化 (更亮、更清楚) */
+        /* 數據指標文字 */
         div[data-testid="stMetricValue"] {
-            font-size: 1.2rem !important;
-            font-weight: 700 !important; /* 加粗 */
+            font-size: 1.25rem !important;
+            font-weight: 700 !important;
         }
         div[data-testid="stMetricLabel"] {
-            font-size: 0.85rem !important;
-            color: #d0d0d0 !important; /* 標籤顏色調亮 */
+            font-size: 0.9rem !important;
+            color: #ccc !important;
         }
-        
-        /* 5. 按鈕樣式 */
-        button {
-            border-radius: 5px !important;
-            font-weight: bold !important;
-        }
-        
-        /* 6. 自定義分隔線 (更細緻) */
+        /* 分隔線 */
         hr.compact {
-            margin: 5px 0px !important;
+            margin: 8px 0px !important;
             border: 0;
             border-top: 1px solid #444;
+        }
+        /* 新手村卡片文字優化 */
+        .term-content p {
+            font-size: 1rem !important;
+            line-height: 1.6 !important;
+            margin-bottom: 0.5rem !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -58,7 +50,7 @@ def render_header(title, show_monitor=False):
     c1.title(title)
     is_live = False
     if show_monitor:
-        st.caption("資料來源: Yahoo Finance / TWSE | V64 清晰對齊版")
+        st.caption("資料來源: Yahoo Finance / TWSE | V66 知識庫重製版")
         is_live = c2.toggle("🔴 即時盤面", value=False)
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
     return is_live
@@ -70,11 +62,14 @@ def render_back_button(callback_func):
     if c2.button("⬅️ 返回列表", use_container_width=True):
         callback_func()
 
-# --- 3. 新手村 ---
+# --- 3. 新手村卡片 (V66: 重寫渲染邏輯) ---
 def render_term_card(title, content):
     with st.container(border=True):
-        st.markdown(f"**{title}**")
-        st.caption(content)
+        # 使用子標題讓名稱更突出
+        st.subheader(f"📌 {title}")
+        st.markdown("<hr class='compact'>", unsafe_allow_html=True)
+        # 使用 markdown 並加入 class 以利 CSS 控制
+        st.markdown(f"<div class='term-content'>{content}</div>", unsafe_allow_html=True)
 
 # --- 4. 簡介 ---
 def render_company_profile(summary):
@@ -82,12 +77,11 @@ def render_company_profile(summary):
         with st.expander("🏢 公司簡介與業務", expanded=False):
             st.write(summary)
 
-# --- 5. 儀表板 (全中文+加粗) ---
+# --- 5. 儀表板 ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              color_settings):
     with st.container():
-        # 第一排
         m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("成交價 (Price)", f"{curr:.2f}", f"{chg:.2f} ({pct:.2f}%)", delta_color=color_settings['delta'])
         m2.metric("最高價 (High)", f"{high:.2f}")
@@ -95,7 +89,6 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         m4.metric("振幅 (Amp)", f"{amp:.2f}%")
         m5.metric("主力動向", main_force)
         
-        # 第二排
         v1, v2, v3, v4, v5 = st.columns(5)
         v1.metric("今日量 (Vol)", f"{int(vol/1000):,} 張")
         diff_vol = int((vol - vol_yest)/1000)
@@ -104,15 +97,14 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         v4.metric("量能狀態", vol_status)
         v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 戰術建議生成 (邏輯保持 V62 的詳細度) ---
+# --- 6. 戰術建議生成 ---
 def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="general"):
     pivot = (high + low + price) / 3
     r1 = 2 * pivot - low
     s1 = 2 * pivot - high
     
     action = "觀望"
-    # 使用 hex color 讓顏色更鮮豔
-    color_hex = "#aaaaaa" # 灰色
+    color_hex = "#aaaaaa"
     
     entry_price_txt = "-"
     exit_price_txt = "-"
@@ -121,27 +113,27 @@ def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="ge
     reasoning = "數據盤整中"
     hold_time = "-"
 
-    if strategy_type == 'day': # 當沖
+    if strategy_type == 'day': 
         stop_price = low * 0.99
         target_price = r1 if r1 > price else price * 1.02
         hold_time = "當日沖銷"
         if price > m5 and price > pivot:
-            action = "🔥 強力作多"; color_hex = "#FF2B2B" # 亮紅
+            action = "🔥 強力作多"; color_hex = "#FF2B2B"
             entry_price_txt = f"{pivot:.1f} 附近 (平盤上)"
             exit_price_txt = f"跌破 {m5:.1f} (均價線)"
             reasoning = "量價齊揚站上樞紐，多方動能強勁，適合順勢操作。"
         elif price < pivot:
-            action = "🧊 偏空操作"; color_hex = "#00E050" # 亮綠
+            action = "🧊 偏空操作"; color_hex = "#00E050"
             entry_price_txt = f"反彈 {pivot:.1f} 不過"
             exit_price_txt = "急殺出量或尾盤"
             reasoning = "股價受制於樞紐之下，上方賣壓重，建議偏空思考。"
         else:
-            action = "⚖️ 區間震盪"; color_hex = "#FF9F1C" # 亮橘
+            action = "⚖️ 區間震盪"; color_hex = "#FF9F1C"
             entry_price_txt = f"{s1:.1f} 支撐處"
             exit_price_txt = f"{r1:.1f} 壓力處"
             reasoning = "多空膠著，建議區間來回操作或觀望。"
             
-    elif strategy_type == 'short': # 短線
+    elif strategy_type == 'short':
         stop_price = m20
         target_price = price * 1.08
         hold_time = "3-5 天"
@@ -156,7 +148,7 @@ def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="ge
             exit_price_txt = "有效跌破月線"
             reasoning = "短線漲多乖離修正，等待回測月線支撐確認後再進場。"
             
-    elif strategy_type == 'long': # 長線
+    elif strategy_type == 'long':
         stop_price = m60
         target_price = price * 1.20
         hold_time = "1-3 個月"
@@ -171,7 +163,7 @@ def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="ge
             exit_price_txt = "續破底"
             reasoning = "目前仍處於空頭或整理架構，建議等待趨勢翻多。"
             
-    else: # 強勢
+    else: 
         stop_price = m20
         target_price = price * 1.05
         hold_time = "視情況"
@@ -188,7 +180,7 @@ def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="ge
 
     return action, color_hex, target_price, stop_price, entry_price_txt, exit_price_txt, hold_time, reasoning
 
-# --- 7. 詳細診斷卡 (V64: 清晰對齊版) ---
+# --- 7. 詳細診斷卡 ---
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None, strategy_info=None):
     chg_color = "black"
     pct_txt = ""
@@ -237,9 +229,7 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
     
     rank_tag = f"#{rank}" if rank else ""
     
-    # --- 卡片佈局 (優化對齊) ---
     with st.container(border=True):
-        # 第一列：股票資訊 + 價格 + 核心建議(HTML增強) + 按鈕
         c1, c2, c3, c4 = st.columns([1.3, 1.3, 3.5, 0.8])
         with c1:
             st.markdown(f"#### {rank_tag} {name}")
@@ -248,7 +238,6 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
             st.markdown(f"#### {price:.2f}")
             st.markdown(f":{chg_color}[{pct_txt}]")
         with c3:
-            # 使用 HTML div + flex 來強制垂直置中，並加強字體
             st.markdown(
                 f"""
                 <div style="display:flex; flex-direction:column; justify-content:center; height:100%;">
@@ -259,15 +248,12 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
                 unsafe_allow_html=True
             )
         with c4:
-            # 墊高按鈕以對齊
             st.write("") 
             if st.button("分析", key=f"{key_prefix}_{code}", use_container_width=True):
                 return True
         
-        # 微型分隔線
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         
-        # 第二列：詳細戰術數據 (確保標題與數值清晰)
         d1, d2, d3, d4 = st.columns(4)
         with d1:
             st.markdown(f"🎯 **目標價** : `{target_val:.2f}`")
@@ -278,7 +264,6 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
         with d4:
             st.caption(f"📤 **建議離場**\n{exit_txt}")
             
-        # 第三列：分析理由 + 持股時間
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         e1, e2 = st.columns([3, 1])
         with e1:
