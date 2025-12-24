@@ -20,7 +20,7 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V71", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V72", layout="wide")
 
 defaults = {
     'view_mode': 'welcome', 'user_id': None, 'page_stack': ['welcome'],
@@ -142,16 +142,16 @@ with st.sidebar:
     else:
         if st.button("🚪 登出系統"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 71.0 (K線戰略與週轉率版)")
+    st.markdown("---"); st.caption("Ver: 72.0 (5日K線戰法版)")
 
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V71")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V72")
     st.markdown("""
-    ### 🚀 V71 更新：K線戰略與週轉率
-    * **📊 週轉率指標**：儀表板新增週轉率顯示，精準判斷籌碼熱度。
-    * **🕯️ K線型態戰法**：AI 自動分析最新 K 線型態 (長紅、錘頭、十字...) 並給出詳細操作建議。
+    ### 🚀 V72 更新：5日 K 線戰法
+    * **🧠 深度分析**：AI 現在會分析過去 5 天的 K 線排列，識別「晨星」、「吞噬」、「紅三兵」等複雜型態。
+    * **🎨 視覺戰報**：多方訊號紅底顯示，空方訊號綠底顯示，操作建議更直觀。
     * **🔴 自動刷新**：支援即時盤面監控。
     """)
     c1, c2 = st.columns(2)
@@ -235,7 +235,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V71)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V72)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
@@ -262,8 +262,6 @@ elif mode == 'analysis':
     if src == "fail": st.error("查無資料")
     elif src == "yahoo":
         info = stock.info
-        
-        # --- V71: 計算週轉率 ---
         shares_out = info.get('sharesOutstanding', 0)
         curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]; chg = curr - prev; pct = (chg/prev)*100
         vt = df['Volume'].iloc[-1]
@@ -278,10 +276,7 @@ elif mode == 'analysis':
         color_settings = db.get_color_settings(code)
 
         ui.render_company_profile(db.translate_text(info.get('longBusinessSummary','')))
-        
-        # V71: 傳入 turnover_rate
         ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vt, vy, va, vs, fh, turnover_rate, color_settings)
-        
         ui.render_chart(df, f"{name} K線圖", color_settings)
         
         m5 = df['Close'].rolling(5).mean().iloc[-1]; m20 = df['Close'].rolling(20).mean().iloc[-1]; m60 = df['Close'].rolling(60).mean().iloc[-1]
@@ -289,7 +284,6 @@ elif mode == 'analysis':
         rs = u.rolling(14).mean() / d.abs().rolling(14).mean(); rsi = (100 - 100/(1+rs)).iloc[-1]
         bias = ((curr-m60)/m60)*100
         
-        # V71: 傳入 df 供 K線戰法分析
         ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df)
         
     elif src == "twse": st.metric("現價", f"{df['Close']}")
