@@ -3,35 +3,52 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 
-# --- CSS: 極致壓縮版面 (讓卡片變窄的關鍵) ---
+# --- CSS: V63 暴力壓縮版面 (關鍵修正) ---
 def inject_custom_css():
     st.markdown("""
         <style>
-        /* 縮減區塊間距 */
+        /* 1. 全局縮減垂直間距 */
         div[data-testid="stVerticalBlock"] > div {
-            padding-top: 0.05rem;
-            padding-bottom: 0.05rem;
-            gap: 0.2rem;
+            padding-top: 0rem !important;
+            padding-bottom: 0rem !important;
+            gap: 0.1rem !important; /* 元件間距縮到最小 */
         }
-        /* 按鈕縮小 */
+        
+        /* 2. 縮減卡片內部留白 */
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            padding: 5px !important;
+        }
+        
+        /* 3. 按鈕縮小與對齊 */
         button {
             height: auto !important;
-            padding-top: 0.1rem !important;
-            padding-bottom: 0.1rem !important;
+            padding: 2px 10px !important;
             font-size: 0.8rem !important;
+            margin-top: 5px !important;
         }
-        /* 文字縮小與行高調整 */
-        .stMarkdown p, .stCaption {
-            font-size: 0.9rem !important;
+        
+        /* 4. 強制縮減文字行高 */
+        p, .stMarkdown, .stCaption {
             margin-bottom: 0px !important;
+            font-size: 0.9rem !important;
             line-height: 1.2 !important;
         }
-        /* 數據指標緊湊化 */
+        
+        /* 5. 數據指標緊湊化 */
         div[data-testid="stMetricValue"] {
             font-size: 1.1rem !important;
+            padding: 0px !important;
         }
         div[data-testid="stMetricLabel"] {
             font-size: 0.8rem !important;
+            padding: 0px !important;
+        }
+        
+        /* 6. 自定義分隔線樣式 */
+        hr.compact {
+            margin: 3px 0px !important;
+            border: 0;
+            border-top: 1px solid #333;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -43,14 +60,14 @@ def render_header(title, show_monitor=False):
     c1.title(title)
     is_live = False
     if show_monitor:
-        st.caption("資料來源: Yahoo Finance / TWSE | V62 高密度戰術版")
+        st.caption("V63 極致緊湊版 | 資料來源: Yahoo/TWSE")
         is_live = c2.toggle("🔴 即時盤面", value=False)
-    st.divider()
+    st.markdown("<hr class='compact'>", unsafe_allow_html=True)
     return is_live
 
 # --- 2. 返回 ---
 def render_back_button(callback_func):
-    st.divider()
+    st.markdown("<hr class='compact'>", unsafe_allow_html=True)
     _, c2, _ = st.columns([2, 1, 2])
     if c2.button("⬅️ 返回列表", use_container_width=True):
         callback_func()
@@ -67,124 +84,112 @@ def render_company_profile(summary):
         with st.expander("🏢 公司簡介與業務", expanded=False):
             st.write(summary)
 
-# --- 5. 儀表板 (全中文) ---
+# --- 5. 儀表板 ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              color_settings):
     with st.container():
-        # 第一排
         m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("成交價 (Price)", f"{curr:.2f}", f"{chg:.2f} ({pct:.2f}%)", delta_color=color_settings['delta'])
-        m2.metric("最高 (High)", f"{high:.2f}")
-        m3.metric("最低 (Low)", f"{low:.2f}")
-        m4.metric("振幅 (Amp)", f"{amp:.2f}%")
-        m5.metric("主力 (Force)", main_force)
+        m1.metric("成交價", f"{curr:.2f}", f"{chg:.2f} ({pct:.2f}%)", delta_color=color_settings['delta'])
+        m2.metric("最高價", f"{high:.2f}")
+        m3.metric("最低價", f"{low:.2f}")
+        m4.metric("振幅", f"{amp:.2f}%")
+        m5.metric("主力動向", main_force)
         
-        # 第二排
         v1, v2, v3, v4, v5 = st.columns(5)
-        v1.metric("今日量 (Vol)", f"{int(vol/1000):,} 張")
-        diff_vol = int((vol - vol_yest)/1000)
-        v2.metric("昨日量 (Prev)", f"{int(vol_yest/1000):,} 張", f"{diff_vol} 張")
-        v3.metric("均量 (Avg)", f"{int(vol_avg/1000):,} 張")
-        v4.metric("狀態 (State)", vol_status)
-        v5.metric("外資 (Foreign)", f"{foreign_held:.1f}%")
+        v1.metric("今日量", f"{int(vol/1000):,}張")
+        v2.metric("昨日量", f"{int(vol_yest/1000):,}張")
+        v3.metric("五日均量", f"{int(vol_avg/1000):,}張")
+        v4.metric("量能狀態", vol_status)
+        v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 戰術建議生成 (核心邏輯：計算入場/離場價) ---
+# --- 6. 戰術建議生成 (V63: 邏輯不變，維持詳細) ---
 def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="general"):
-    # Pivot Points (樞紐點計算)
     pivot = (high + low + price) / 3
     r1 = 2 * pivot - low
     s1 = 2 * pivot - high
     
     action = "觀望"
     color = "gray"
-    
     # 預設值
-    entry_price_txt = "-"
-    exit_price_txt = "-"
-    target_price = 0.0
-    stop_price = 0.0
-    reasoning = "數據盤整中"
+    entry_txt = "-"
+    exit_txt = "-"
+    target_val = 0.0
+    stop_val = 0.0
+    reasoning = "數據不足"
     hold_time = "-"
 
-    # 策略邏輯
-    if strategy_type == 'day': # 當沖 (Day Trade)
-        # 停損：今日低點往下 1% / 停利：R1 壓力位
+    if strategy_type == 'day': # 當沖
         stop_price = low * 0.99
         target_price = r1 if r1 > price else price * 1.02
         hold_time = "當日沖銷"
-        
         if price > m5 and price > pivot:
             action = "🔥 強力作多"; color = "red"
-            entry_price_txt = f"{pivot:.1f} 附近 (平盤上)"
-            exit_price_txt = f"跌破 {m5:.1f} (均價線)"
-            reasoning = "量價齊揚站上樞紐，多方動能強勁，適合順勢操作。"
+            entry_txt = f"平盤上 {pivot:.1f} 承接"
+            exit_txt = f"跌破均價 {m5:.1f}"
+            reasoning = "爆量站上樞紐，多方強勢，順勢操作。"
         elif price < pivot:
             action = "🧊 偏空操作"; color = "green"
-            entry_price_txt = f"反彈 {pivot:.1f} 不過"
-            exit_price_txt = "急殺出量或尾盤"
-            reasoning = "股價受制於樞紐之下，上方賣壓重，建議偏空思考。"
+            entry_txt = f"反彈 {pivot:.1f} 不過"
+            exit_txt = "急殺出量/尾盤"
+            reasoning = "受制樞紐之下，賣壓重，偏空思考。"
         else:
             action = "⚖️ 區間震盪"; color = "orange"
-            entry_price_txt = f"{s1:.1f} 支撐處"
-            exit_price_txt = f"{r1:.1f} 壓力處"
-            reasoning = "多空膠著，建議區間來回操作或觀望。"
+            entry_txt = f"支撐 {s1:.1f} 附近"
+            exit_txt = f"壓力 {r1:.1f} 附近"
+            reasoning = "多空膠著，區間操作。"
             
-    elif strategy_type == 'short': # 短線 (Short Term)
+    elif strategy_type == 'short': # 短線
         stop_price = m20
         target_price = price * 1.08
         hold_time = "3-5 天"
-        
         if price > m5 and m5 > m20:
             action = "🚀 穩健買進"; color = "red"
-            entry_price_txt = f"回測 {m5:.1f} (5日線)"
-            exit_price_txt = f"跌破 {m20:.1f} (月線)"
-            reasoning = "均線多頭排列，短線趨勢向上，拉回找買點勝率高。"
+            entry_txt = f"回測5日線 {m5:.1f}"
+            exit_txt = f"破10日線"
+            reasoning = "均線多頭，短線趨勢向上，拉回找買點。"
         elif price < m5:
             action = "📉 等待止穩"; color = "orange"
-            entry_price_txt = f"接近 {m20:.1f} 收紅K"
-            exit_price_txt = "有效跌破月線"
-            reasoning = "短線漲多乖離修正，等待回測月線支撐確認後再進場。"
+            entry_txt = f"近月線 {m20:.1f}"
+            exit_txt = "破月線"
+            reasoning = "短線乖離修正，等待回測月線支撐。"
             
-    elif strategy_type == 'long': # 長線 (Long Term)
+    elif strategy_type == 'long': # 長線
         stop_price = m60
         target_price = price * 1.20
         hold_time = "1-3 個月"
-        
         if price > m60:
             action = "🐢 長線續抱"; color = "red"
-            entry_price_txt = f"{m60:.1f} (季線) 附近"
-            exit_price_txt = "季線下彎且股價跌破"
-            reasoning = "股價站穩生命線(季線)，長線保護短線，適合波段持有。"
+            entry_txt = f"季線 {m60:.1f} 上"
+            exit_txt = "季線下彎"
+            reasoning = "站穩生命線，長線保護短線，波段持有。"
         else:
             action = "⏳ 觀望"; color = "gray"
-            entry_price_txt = "突破季線帶量"
-            exit_price_txt = "續破底"
-            reasoning = "目前仍處於空頭或整理架構，建議等待趨勢翻多。"
+            entry_txt = "突破季線"
+            exit_txt = "破底"
+            reasoning = "空頭或整理架構，等待趨勢翻多。"
             
-    else: # 強勢股
+    else: # 強勢
         stop_price = m20
         target_price = price * 1.05
         hold_time = "視情況"
         if price > m20: 
             action = "💪 強勢持有"; color = "red"
-            entry_price_txt = "量縮不破低"
-            exit_price_txt = "爆量收黑"
-            reasoning = "人氣匯聚強勢股，沿著趨勢操作，轉弱即跑。"
+            entry_txt = "量縮不破低"
+            exit_txt = "爆量收黑"
+            reasoning = "人氣匯聚，沿趨勢操作，轉弱即跑。"
         else: 
             action = "⚠️ 轉弱減碼"; color = "green"
-            entry_price_txt = "暫不建議"
-            exit_price_txt = f"反彈 {m20:.1f} 減碼"
-            reasoning = "籌碼鬆動轉弱，建議反彈減碼降低風險。"
+            entry_txt = "暫不建議"
+            exit_txt = f"反彈 {m20:.1f}"
+            reasoning = "籌碼鬆動，建議反彈減碼。"
 
-    return action, color, target_price, stop_price, entry_price_txt, exit_price_txt, hold_time, reasoning
+    return action, color, target_price, stop_price, entry_txt, exit_txt, hold_time, reasoning
 
-# --- 7. 詳細診斷卡 (V62: 窄版高度 + 詳細資訊) ---
+# --- 7. 詳細診斷卡 (V63: 變態級壓縮 + 資訊滿載) ---
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None, strategy_info=None):
     chg_color = "black"
     pct_txt = ""
-    
-    # 預設顯示
     action_title = "計算中"
     action_color = "gray"
     target_val = 0.0
@@ -194,7 +199,7 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
     hold_txt = "-"
     reason_txt = "資料不足"
     
-    # 根據 strategy_info 判斷策略類型
+    # 策略判斷
     strat_type = "general"
     if strategy_info:
         if "當沖" in strategy_info or "量" in strategy_info: strat_type = "day"
@@ -224,7 +229,6 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
                 rs = u.rolling(14).mean() / d.abs().rolling(14).mean()
                 rsi = (100 - 100/(1+rs)).iloc[-1] if not rs.isna().iloc[-1] else 50
                 
-                # 取得詳細建議
                 action_title, action_color, target_val, stop_val, entry_txt, exit_txt, hold_txt, reason_txt = generate_trade_advice(
                     curr, high, low, m5, m20, m60, rsi, strat_type
                 )
@@ -232,10 +236,10 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
     
     rank_tag = f"#{rank}" if rank else ""
     
-    # --- 卡片佈局 (V62: 高密度排版) ---
+    # --- V63 卡片佈局 (利用 Markdown HTML 進行細部排版) ---
     with st.container(border=True):
-        # 第一行：股票基本資訊 + 建議操作 (最顯眼)
-        c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.5, 0.8])
+        # 第一列：股票資訊 + 價格 + 核心建議 + 按鈕
+        c1, c2, c3, c4 = st.columns([1.3, 1.3, 3.5, 0.8])
         with c1:
             st.markdown(f"**{rank_tag} {name}**")
             st.caption(f"{code}")
@@ -243,27 +247,27 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
             st.markdown(f"**{price:.2f}**")
             st.markdown(f":{chg_color}[{pct_txt}]")
         with c3:
-            st.markdown(f":{action_color}[**{action_title}**]")
-            st.caption(f"持股: {hold_txt}")
+            # 使用 HTML span 調整字體大小和顏色，節省空間
+            st.markdown(f"<span style='color:{action_color}; font-weight:bold; font-size:1.1rem'>{action_title}</span> <span style='font-size:0.8rem; color:gray'>({strategy_info if strategy_info else '監控中'})</span>", unsafe_allow_html=True)
+            st.caption(f"💡 {reason_txt}")
         with c4:
             if st.button("分析", key=f"{key_prefix}_{code}", use_container_width=True):
                 return True
         
-        st.write("---") # 分隔線
+        # 插入微型分隔線
+        st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         
-        # 第二行：詳細價位建議 (4欄)
+        # 第二列：詳細戰術數據 (4欄，數據與標題同行顯示以省空間)
         d1, d2, d3, d4 = st.columns(4)
         with d1:
-            st.caption(f"**🎯 目標價**\n{target_val:.2f}")
+            st.markdown(f"🎯 **目標:** {target_val:.2f}")
+            st.caption(f"🛡️ **停損:** {stop_val:.2f}")
         with d2:
-            st.caption(f"**🛡️ 停損價**\n{stop_val:.2f}")
+            st.markdown(f"📥 **入場:** {entry_txt}")
         with d3:
-            st.caption(f"**📥 建議入場**\n{entry_txt}")
+            st.markdown(f"📤 **離場:** {exit_txt}")
         with d4:
-            st.caption(f"**📤 建議離場**\n{exit_txt}")
-            
-        # 第三行：分析理由
-        st.info(f"💡 **AI觀點**: {reason_txt}")
+            st.markdown(f"📅 **持股:** {hold_txt}")
 
     return False
 
@@ -280,9 +284,9 @@ def render_chart(df, title, color_settings):
         name='K線', increasing_line_color=color_settings['up'], decreasing_line_color=color_settings['down']
     ), row=1, col=1)
     
-    fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], line=dict(color='#FF00FF', width=1), name='MA5 (週)'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1), name='MA20 (月)'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MA60'], line=dict(color='#0000FF', width=1), name='MA60 (季)'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], line=dict(color='#FF00FF', width=1), name='MA5'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1), name='MA20'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MA60'], line=dict(color='#0000FF', width=1), name='MA60'), row=1, col=1)
     
     vol_colors = [color_settings['up'] if c >= o else color_settings['down'] for c, o in zip(df['Close'], df['Open'])]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=vol_colors, name='成交量'), row=2, col=1)
@@ -326,8 +330,8 @@ def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low):
 
     with t2:
         st.markdown("#### 🎯 關鍵價位 (Pivot Points)")
-        st.info("計算基礎：(最高+最低+收盤)/3，適用於隔日沖參考")
+        st.info("計算基礎：(最高+最低+收盤)/3")
         cp1, cp2, cp3 = st.columns(3)
         cp1.metric("壓力位 (R1)", f"{r1:.2f}", help="預估上方第一道壓力")
-        cp2.metric("中軸 (Pivot)", f"{pivot:.2f}", help="多空分水嶺，站上偏多")
+        cp2.metric("中軸 (Pivot)", f"{pivot:.2f}", help="多空分水嶺")
         cp3.metric("支撐位 (S1)", f"{s1:.2f}", help="預估下方第一道支撐")
