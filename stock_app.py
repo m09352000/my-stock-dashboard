@@ -13,7 +13,6 @@ import importlib
 import stock_db as db
 import stock_ui as ui
 
-# 載入知識庫
 try:
     import knowledge
     importlib.reload(knowledge)
@@ -21,13 +20,13 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V70", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V71", layout="wide")
 
 defaults = {
     'view_mode': 'welcome', 'user_id': None, 'page_stack': ['welcome'],
     'current_stock': "", 'current_name': "", 'scan_pool': [], 'filtered_pool': [],      
     'scan_target_group': "全部", 'watch_active': False, 'scan_results': [],
-    'monitor_active': False # V70: 確保 monitor 狀態存在
+    'monitor_active': False
 }
 for k, v in defaults.items():
     if k not in st.session_state: st.session_state[k] = v
@@ -143,17 +142,17 @@ with st.sidebar:
     else:
         if st.button("🚪 登出系統"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 70.0 (即時監控引擎版)")
+    st.markdown("---"); st.caption("Ver: 71.0 (K線戰略與週轉率版)")
 
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V70")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V71")
     st.markdown("""
-    ### 🚀 V70 更新：即時監控引擎
-    * **🔴 自動刷新**：在個股分析頁面開啟「即時盤面」，系統將每 3 秒自動更新報價。
-    * **⏱️ 時間戳記**：即時顯示最後更新時間，確保數據不延遲。
-    * **📚 完整保留**：繼承所有 V69 的詳細戰術與教學內容。
+    ### 🚀 V71 更新：K線戰略與週轉率
+    * **📊 週轉率指標**：儀表板新增週轉率顯示，精準判斷籌碼熱度。
+    * **🕯️ K線型態戰法**：AI 自動分析最新 K 線型態 (長紅、錘頭、十字...) 並給出詳細操作建議。
+    * **🔴 自動刷新**：支援即時盤面監控。
     """)
     c1, c2 = st.columns(2)
     with c1:
@@ -236,7 +235,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V70)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V71)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
@@ -253,20 +252,25 @@ elif mode == 'watch':
 elif mode == 'analysis':
     code = st.session_state['current_stock']; name = st.session_state['current_name']
     
-    # V70: 接收回傳的 is_live 狀態
     is_live = ui.render_header(f"{name} {code}", show_monitor=True)
-    
-    # V70: 核心自動刷新機制
     if is_live:
-        time.sleep(3) # 每 3 秒刷新一次
+        time.sleep(3)
         st.rerun()
         
     full_id, stock, df, src = db.get_stock_data(code)
     
     if src == "fail": st.error("查無資料")
     elif src == "yahoo":
-        info = stock.info; curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]; chg = curr - prev; pct = (chg/prev)*100
-        vt = df['Volume'].iloc[-1]; vy = df['Volume'].iloc[-2]; va = df['Volume'].tail(5).mean() + 1
+        info = stock.info
+        
+        # --- V71: 計算週轉率 ---
+        shares_out = info.get('sharesOutstanding', 0)
+        curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]; chg = curr - prev; pct = (chg/prev)*100
+        vt = df['Volume'].iloc[-1]
+        
+        turnover_rate = (vt / shares_out * 100) if shares_out and shares_out > 0 else 0
+        
+        vy = df['Volume'].iloc[-2]; va = df['Volume'].tail(5).mean() + 1
         high = df['High'].iloc[-1]; low = df['Low'].iloc[-1]; amp = ((high - low) / prev) * 100
         mf = "主力進貨 🔴" if (chg>0 and vt>vy) else ("主力出貨 🟢" if (chg<0 and vt>vy) else "觀望")
         vol_r = vt/va; vs = "爆量 🔥" if vol_r>1.5 else ("量縮 💤" if vol_r<0.6 else "正常")
@@ -274,14 +278,20 @@ elif mode == 'analysis':
         color_settings = db.get_color_settings(code)
 
         ui.render_company_profile(db.translate_text(info.get('longBusinessSummary','')))
-        ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vt, vy, va, vs, fh, color_settings)
+        
+        # V71: 傳入 turnover_rate
+        ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vt, vy, va, vs, fh, turnover_rate, color_settings)
+        
         ui.render_chart(df, f"{name} K線圖", color_settings)
         
         m5 = df['Close'].rolling(5).mean().iloc[-1]; m20 = df['Close'].rolling(20).mean().iloc[-1]; m60 = df['Close'].rolling(60).mean().iloc[-1]
         delta = df['Close'].diff(); u = delta.copy(); d = delta.copy(); u[u<0]=0; d[d>0]=0
         rs = u.rolling(14).mean() / d.abs().rolling(14).mean(); rsi = (100 - 100/(1+rs)).iloc[-1]
         bias = ((curr-m60)/m60)*100
-        ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low)
+        
+        # V71: 傳入 df 供 K線戰法分析
+        ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df)
+        
     elif src == "twse": st.metric("現價", f"{df['Close']}")
     ui.render_back_button(go_back)
 
