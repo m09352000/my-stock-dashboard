@@ -13,7 +13,7 @@ import importlib
 import stock_db as db
 import stock_ui as ui
 
-# 強制重載 knowledge
+# 載入知識庫
 try:
     import knowledge
     importlib.reload(knowledge)
@@ -21,12 +21,13 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V67", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V70", layout="wide")
 
 defaults = {
     'view_mode': 'welcome', 'user_id': None, 'page_stack': ['welcome'],
     'current_stock': "", 'current_name': "", 'scan_pool': [], 'filtered_pool': [],      
-    'scan_target_group': "全部", 'watch_active': False, 'scan_results': []
+    'scan_target_group': "全部", 'watch_active': False, 'scan_results': [],
+    'monitor_active': False # V70: 確保 monitor 狀態存在
 }
 for k, v in defaults.items():
     if k not in st.session_state: st.session_state[k] = v
@@ -142,17 +143,17 @@ with st.sidebar:
     else:
         if st.button("🚪 登出系統"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 67.0 (K線圖解版)")
+    st.markdown("---"); st.caption("Ver: 70.0 (即時監控引擎版)")
 
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V67")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V70")
     st.markdown("""
-    ### 🚀 V67 更新：K線戰法圖解
-    * **🕯️ 動態教學**：新手村新增 K 線型態教學，自動繪製 10 種關鍵反轉型態。
-    * **📚 內容擴充**：詞條庫大幅增加，包含籌碼、基本面與實戰俚語。
-    * **✨ 排版優化**：修復文字擠壓問題，閱讀更舒適。
+    ### 🚀 V70 更新：即時監控引擎
+    * **🔴 自動刷新**：在個股分析頁面開啟「即時盤面」，系統將每 3 秒自動更新報價。
+    * **⏱️ 時間戳記**：即時顯示最後更新時間，確保數據不延遲。
+    * **📚 完整保留**：繼承所有 V69 的詳細戰術與教學內容。
     """)
     c1, c2 = st.columns(2)
     with c1:
@@ -235,7 +236,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V67)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V70)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
@@ -251,8 +252,15 @@ elif mode == 'watch':
 
 elif mode == 'analysis':
     code = st.session_state['current_stock']; name = st.session_state['current_name']
+    
+    # V70: 接收回傳的 is_live 狀態
     is_live = ui.render_header(f"{name} {code}", show_monitor=True)
-    if is_live: time.sleep(5); st.rerun()
+    
+    # V70: 核心自動刷新機制
+    if is_live:
+        time.sleep(3) # 每 3 秒刷新一次
+        st.rerun()
+        
     full_id, stock, df, src = db.get_stock_data(code)
     
     if src == "fail": st.error("查無資料")
@@ -278,31 +286,21 @@ elif mode == 'analysis':
     ui.render_back_button(go_back)
 
 elif mode == 'learn':
-    # V67: 新增 K線型態 Tab
     ui.render_header("📖 股市新手村"); t1, t2, t3 = st.tabs(["策略說明", "名詞解釋", "🕯️ K線型態"])
-    
     with t1: st.markdown(STRATEGY_DESC)
-    
     with t2:
         q = st.text_input("搜尋名詞")
         for cat, items in STOCK_TERMS.items():
             with st.expander(cat, expanded=True):
                 for k, v in items.items():
                     if not q or q in k: ui.render_term_card(k, v)
-    
     with t3:
         st.info("這裡展示常見的 K 線反轉訊號，紅 K 代表漲 (台股規則)。")
-        
         st.subheader("🔥 多方訊號 (看漲)")
-        for name, data in KLINE_PATTERNS.get("bull", {}).items():
-            ui.render_kline_pattern_card(name, data)
-            
+        for name, data in KLINE_PATTERNS.get("bull", {}).items(): ui.render_kline_pattern_card(name, data)
         st.divider()
-        
         st.subheader("❄️ 空方訊號 (看跌)")
-        for name, data in KLINE_PATTERNS.get("bear", {}).items():
-            ui.render_kline_pattern_card(name, data)
-
+        for name, data in KLINE_PATTERNS.get("bear", {}).items(): ui.render_kline_pattern_card(name, data)
     ui.render_back_button(go_back)
 
 elif mode == 'chat':
