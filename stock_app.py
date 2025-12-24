@@ -16,7 +16,7 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "系統載入中..."
 
-st.set_page_config(page_title="AI 股市戰情室 V62", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V64", layout="wide")
 
 defaults = {
     'view_mode': 'welcome', 'user_id': None, 'page_stack': ['welcome'],
@@ -137,17 +137,17 @@ with st.sidebar:
     else:
         if st.button("🚪 登出系統"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 63.0 (極致壓縮版)")
+    st.markdown("---"); st.caption("Ver: 64.0 (清晰對齊版)")
 
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V63")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V64")
     st.markdown("""
-    ### 🚀 V63 更新：極致緊湊戰術面板
-    * **🤏 空間魔術**：透過 CSS 強制移除多餘空白，讓您可以一眼看到更多股票。
-    * **📝 詳細不減**：保留所有入場、離場、持股建議與中文說明。
-    * **🔍 增強掃描**：確保掃描結果豐富，不再只有寥寥幾檔。
+    ### 🚀 V64 更新：清晰對齊與排版優化
+    * **👀 視覺優化**：修復文字被切斷問題，字體加粗更清晰。
+    * **📐 完美對齊**：所有建議與數值皆垂直置中，閱讀不費力。
+    * **📝 內容完整**：保留所有進出場建議，並以更直觀的方式呈現。
     """)
     c1, c2 = st.columns(2)
     with c1:
@@ -230,7 +230,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V63)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V64)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
