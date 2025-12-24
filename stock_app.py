@@ -8,21 +8,20 @@ import subprocess
 import os
 from PIL import Image, ImageOps, ImageEnhance
 import pytesseract
-import importlib # V65 新增：用來強制更新模組
+import importlib
 
 import stock_db as db
 import stock_ui as ui
 
-# --- V65 關鍵修改：強制重新載入 knowledge.py ---
-# 這樣您修改新手村內容後，網頁才會同步更新
+# 強制重載 knowledge
 try:
     import knowledge
-    importlib.reload(knowledge) 
-    from knowledge import STOCK_TERMS, STRATEGY_DESC
+    importlib.reload(knowledge)
+    from knowledge import STOCK_TERMS, STRATEGY_DESC, KLINE_PATTERNS
 except:
-    STOCK_TERMS = {}; STRATEGY_DESC = "系統載入中... (請確認 knowledge.py 是否存在)"
+    STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V65", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V67", layout="wide")
 
 defaults = {
     'view_mode': 'welcome', 'user_id': None, 'page_stack': ['welcome'],
@@ -143,17 +142,17 @@ with st.sidebar:
     else:
         if st.button("🚪 登出系統"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 65.0 (自動熱更新版)")
+    st.markdown("---"); st.caption("Ver: 67.0 (K線圖解版)")
 
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V65")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V67")
     st.markdown("""
-    ### 🚀 V65 更新：知識庫熱更新系統
-    * **📚 新手村擴充**：支援動態載入最新的股市名詞與策略說明。
-    * **🔄 自動重載**：修改 `knowledge.py` 後無需重啟，立即生效。
-    * **🛠️ 系統優化**：全中文化介面與 OCR 引擎整合。
+    ### 🚀 V67 更新：K線戰法圖解
+    * **🕯️ 動態教學**：新手村新增 K 線型態教學，自動繪製 10 種關鍵反轉型態。
+    * **📚 內容擴充**：詞條庫大幅增加，包含籌碼、基本面與實戰俚語。
+    * **✨ 排版優化**：修復文字擠壓問題，閱讀更舒適。
     """)
     c1, c2 = st.columns(2)
     with c1:
@@ -236,7 +235,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V65)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V67)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
@@ -279,14 +278,31 @@ elif mode == 'analysis':
     ui.render_back_button(go_back)
 
 elif mode == 'learn':
-    ui.render_header("📖 股市新手村"); t1, t2 = st.tabs(["策略說明", "名詞解釋"])
+    # V67: 新增 K線型態 Tab
+    ui.render_header("📖 股市新手村"); t1, t2, t3 = st.tabs(["策略說明", "名詞解釋", "🕯️ K線型態"])
+    
     with t1: st.markdown(STRATEGY_DESC)
+    
     with t2:
         q = st.text_input("搜尋名詞")
         for cat, items in STOCK_TERMS.items():
             with st.expander(cat, expanded=True):
                 for k, v in items.items():
                     if not q or q in k: ui.render_term_card(k, v)
+    
+    with t3:
+        st.info("這裡展示常見的 K 線反轉訊號，紅 K 代表漲 (台股規則)。")
+        
+        st.subheader("🔥 多方訊號 (看漲)")
+        for name, data in KLINE_PATTERNS.get("bull", {}).items():
+            ui.render_kline_pattern_card(name, data)
+            
+        st.divider()
+        
+        st.subheader("❄️ 空方訊號 (看跌)")
+        for name, data in KLINE_PATTERNS.get("bear", {}).items():
+            ui.render_kline_pattern_card(name, data)
+
     ui.render_back_button(go_back)
 
 elif mode == 'chat':
@@ -344,20 +360,19 @@ elif mode == 'scan':
 
                         valid = False
                         
-                        # V62 邏輯 (保留)
                         if stype == 'day': 
-                            if vol > vol_prev and p >= d['Open'].iloc[-1]:
+                            if vol > vol_prev * 1.5 and p > d['Open'].iloc[-1] and p > m5 and amp > 2:
                                 sort_val = vol 
                                 info_txt = f"🔥 爆量 {int(vol/vol_prev)} 倍 | 振幅 {amp:.1f}%"
                                 valid = True
                         elif stype == 'short': 
-                            if m5 > m20 and p > m20:
+                            if m5 > m20 and p > m20 and 50 < rsi < 75:
                                 sort_val = pct 
                                 info_txt = f"🚀 多頭排列 | RSI {rsi:.0f}"
                                 valid = True
                         elif stype == 'long': 
                             bias = ((p - m60)/m60)*100
-                            if p > m60: 
+                            if p > m60 and -5 < bias < 10: 
                                 sort_val = vol 
                                 info_txt = f"🐢 季線之上 | 乖離 {bias:.1f}%"
                                 valid = True
