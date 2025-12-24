@@ -3,18 +3,18 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 
-# --- CSS: V68 排版微調 (針對K線教學優化) ---
+# --- CSS: V69 排版微調 ---
 def inject_custom_css():
     st.markdown("""
         <style>
-        /* V68: 調整 K線卡片的標題間距 */
+        /* V68/69: 調整 K線卡片的標題間距 */
         .kline-card-header {
             margin-top: 0.5rem !important;
             margin-bottom: 0.2rem !important;
             font-size: 1.1rem !important;
             font-weight: bold;
         }
-        /* V68: 優化列表樣式 */
+        /* V68/69: 優化列表樣式 */
         .action-list ul {
             padding-left: 1.2rem !important;
             margin-bottom: 0rem !important;
@@ -63,7 +63,7 @@ def render_header(title, show_monitor=False):
     c1.title(title)
     is_live = False
     if show_monitor:
-        st.caption("資料來源: Yahoo Finance / TWSE | V68 K線戰法極致版")
+        st.caption("資料來源: Yahoo Finance / TWSE | V69 完整修復版")
         is_live = c2.toggle("🔴 即時盤面", value=False)
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
     return is_live
@@ -82,19 +82,18 @@ def render_term_card(title, content):
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         st.markdown(f"<div class='term-content'>{content}</div>", unsafe_allow_html=True)
 
-# --- V68 大改版: K線型態繪圖卡片 (縮小圖表 + 詳細解說) ---
+# --- V69: K線型態繪圖卡片 (確認縮小版) ---
 def render_kline_pattern_card(title, pattern_data):
     """
-    V68: 動態繪製更緊湊的 K 線圖，並顯示詳細的分段解說與色彩註記。
+    動態繪製更緊湊的 K 線圖 (高度 180px)，並顯示詳細解說。
     """
-    # 從新的資料結構中讀取各部分
     morph = pattern_data.get('morphology', '無資料')
     psycho = pattern_data.get('psychology', '無資料')
     action_html = pattern_data.get('action', '無資料')
     raw_data = pattern_data.get('data', [])
     
     with st.container(border=True):
-        # V68 關鍵修改: 調整欄位比例，讓圖更窄，文字更寬 [1, 2.5]
+        # 欄位比例 [1, 2.5] 確保文字區域夠大
         c1, c2 = st.columns([1, 2.5]) 
         
         with c1:
@@ -109,19 +108,17 @@ def render_kline_pattern_card(title, pattern_data):
             )])
             
             fig.update_layout(
-                margin=dict(l=2, r=2, t=10, b=2), # 邊距縮到最小
-                height=180, # V68 關鍵修改: 高度縮小 (原250)
+                margin=dict(l=2, r=2, t=10, b=2),
+                height=180, # 確認高度縮小
                 xaxis=dict(visible=False, fixedrange=True), 
                 yaxis=dict(visible=False, fixedrange=True),
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                showlegend=False, dragmode=False # 禁止拖動
+                showlegend=False, dragmode=False
             )
-            # 在左側欄位垂直置中顯示圖表
             st.write("") # 墊高
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
             
         with c2:
-            # V68: 使用自定義 CSS class 渲染標題
             st.markdown(f"### 💡 {title}")
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
             
@@ -132,7 +129,6 @@ def render_kline_pattern_card(title, pattern_data):
             st.caption(psycho)
             
             st.markdown("<div class='kline-card-header'>【實戰操作建議】</div>", unsafe_allow_html=True)
-            # V68 關鍵: 使用 unsafe_allow_html=True 渲染帶有顏色的 HTML 列表
             st.markdown(f"<div class='action-list'>{action_html}</div>", unsafe_allow_html=True)
 
 # --- 4. 簡介 ---
@@ -169,13 +165,12 @@ def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="ge
     
     action = "觀望"
     color_hex = "#aaaaaa"
-    
-    entry_price_txt = "-"
-    exit_price_txt = "-"
     target_price = 0.0
     stop_price = 0.0
-    reasoning = "數據盤整中"
+    entry_price_txt = "-"
+    exit_price_txt = "-"
     hold_time = "-"
+    reasoning = "數據盤整中"
 
     if strategy_type == 'day': 
         stop_price = low * 0.99
