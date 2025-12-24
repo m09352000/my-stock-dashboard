@@ -28,7 +28,6 @@ for k, v in defaults.items():
 
 if not st.session_state['scan_pool']:
     try:
-        # 嘗試抓取更多股票以確保掃描數量足夠
         all_codes = [c for c in twstock.codes.values() if c.type == "股票"]
         st.session_state['scan_pool'] = sorted([c.code for c in all_codes])
         groups = sorted(list(set(c.group for c in all_codes if c.group)))
@@ -116,7 +115,6 @@ with st.sidebar:
     st.markdown("### 🤖 AI 策略掃描")
     with st.container(border=True):
         sel_group = st.selectbox("1️⃣ 掃描範圍", st.session_state.get('all_groups', ["全部"]), index=0)
-        # 更新後的策略名稱
         strat_map = {
             "⚡ 強力當沖 (高獲利機率)": "day", 
             "📈 穩健短線 (波段操作)": "short", 
@@ -139,17 +137,17 @@ with st.sidebar:
     else:
         if st.button("🚪 登出系統"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 62.0 (詳細戰術版)")
+    st.markdown("---"); st.caption("Ver: 63.0 (極致壓縮版)")
 
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V62")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V63")
     st.markdown("""
-    ### 🚀 V62 更新：高密度戰術面板
-    * **📝 詳細戰術**：包含「建議入場」、「建議離場」與「持股時間」。
-    * **🔍 增強掃描**：策略邏輯優化，確保每次掃描提供 20 檔以上高勝率標的。
-    * **🇨🇳 全中文**：介面完全中文化，資訊清楚易讀。
+    ### 🚀 V63 更新：極致緊湊戰術面板
+    * **🤏 空間魔術**：透過 CSS 強制移除多餘空白，讓您可以一眼看到更多股票。
+    * **📝 詳細不減**：保留所有入場、離場、持股建議與中文說明。
+    * **🔍 增強掃描**：確保掃描結果豐富，不再只有寥寥幾檔。
     """)
     c1, c2 = st.columns(2)
     with c1:
@@ -206,7 +204,7 @@ elif mode == 'watch':
                     else: st.error("未能辨識有效股票"); st.text_area("除錯資訊", debug_info['raw_text'])
             else: st.error("❌ OCR 引擎未安裝")
 
-        st.divider()
+        st.markdown("<hr class='compact'>", unsafe_allow_html=True)
 
         if wl:
             stock_data = []
@@ -231,8 +229,8 @@ elif mode == 'watch':
                             db.update_watchlist(uid, code_to_remove, "remove")
                         st.success("已移除"); st.rerun()
 
-            st.divider()
-            if st.button("🚀 啟動 AI 詳細診斷 (V62)", use_container_width=True): 
+            st.markdown("<hr class='compact'>", unsafe_allow_html=True)
+            if st.button("🚀 啟動 AI 詳細診斷 (V63)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
@@ -242,7 +240,6 @@ elif mode == 'watch':
                     n = twstock.codes[code].name if code in twstock.codes else code
                     if d is not None:
                         curr = d['Close'].iloc[-1] if isinstance(d, pd.DataFrame) else d['Close']
-                        # 自選股也使用詳細卡片，傳入策略字串以觸發計算
                         if ui.render_detailed_card(code, n, curr, d, src, key_prefix="watch", strategy_info="自選觀察"): nav_to('analysis', code, n); st.rerun()
         else: st.info("目前無自選股")
         ui.render_back_button(go_back)
@@ -293,7 +290,7 @@ elif mode == 'chat':
         with st.form("msg"):
             m = st.text_input("留言內容")
             if st.form_submit_button("送出") and m: db.save_comment(st.session_state['user_id'], m); st.rerun()
-    st.divider(); df = db.get_comments()
+    st.markdown("<hr class='compact'>", unsafe_allow_html=True); df = db.get_comments()
     for i, r in df.iloc[::-1].head(20).iterrows(): st.info(f"**{r['Nickname']}** ({r['Time']}):\n{r['Message']}")
     ui.render_back_button(go_back)
 
@@ -314,7 +311,6 @@ elif mode == 'scan':
         else: target_pool = full_pool
 
         if not target_pool: st.error("無資料"); st.stop()
-        # 增加掃描上限至 500 檔以確保能找出足夠多的股票
         bar = st.progress(0); limit = 500 
         
         for i, c in enumerate(target_pool):
@@ -344,26 +340,22 @@ elif mode == 'scan':
                         
                         # V62 邏輯：放寬標準，改用排序法，確保找出至少 20 檔
                         if stype == 'day': 
-                            # 只要有量且沒跌破開盤價就算入選，後續用量排序
                             if vol > vol_prev and p >= d['Open'].iloc[-1]:
                                 sort_val = vol 
                                 info_txt = f"🔥 爆量 {int(vol/vol_prev)} 倍 | 振幅 {amp:.1f}%"
                                 valid = True
                         elif stype == 'short': 
-                            # 只要黃金交叉或均線向上就算
                             if m5 > m20 and p > m20:
                                 sort_val = pct 
                                 info_txt = f"🚀 多頭排列 | RSI {rsi:.0f}"
                                 valid = True
                         elif stype == 'long': 
-                            # 只要在季線上就算
                             bias = ((p - m60)/m60)*100
                             if p > m60: 
                                 sort_val = vol 
                                 info_txt = f"🐢 季線之上 | 乖離 {bias:.1f}%"
                                 valid = True
                         elif stype == 'top': 
-                            # 只要成交量夠大就算
                             if vol > 1000000: 
                                 sort_val = pct 
                                 info_txt = f"🏆 漲幅 {pct:.2f}% | 量 {int(vol/1000)}張"
