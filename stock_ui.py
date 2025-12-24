@@ -3,38 +3,36 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 
-# --- CSS: V66 排版微調 ---
+# --- CSS: V67 優化 ---
 def inject_custom_css():
     st.markdown("""
         <style>
-        /* 容器間距 */
         div[data-testid="stVerticalBlock"] > div {
             padding-top: 0.1rem;
             padding-bottom: 0.1rem;
-            gap: 0.4rem;
+            gap: 0.3rem;
         }
-        /* 按鈕樣式 */
         button {
             height: auto !important;
-            padding: 2px 10px !important;
-            font-size: 0.85rem !important;
+            padding-top: 0.2rem !important;
+            padding-bottom: 0.2rem !important;
         }
-        /* 數據指標文字 */
+        .stCaption {
+            font-size: 0.95rem !important; 
+        }
         div[data-testid="stMetricValue"] {
             font-size: 1.25rem !important;
             font-weight: 700 !important;
         }
         div[data-testid="stMetricLabel"] {
             font-size: 0.9rem !important;
-            color: #ccc !important;
+            color: #d0d0d0 !important;
         }
-        /* 分隔線 */
         hr.compact {
             margin: 8px 0px !important;
             border: 0;
             border-top: 1px solid #444;
         }
-        /* 新手村卡片文字優化 */
         .term-content p {
             font-size: 1rem !important;
             line-height: 1.6 !important;
@@ -50,7 +48,7 @@ def render_header(title, show_monitor=False):
     c1.title(title)
     is_live = False
     if show_monitor:
-        st.caption("資料來源: Yahoo Finance / TWSE | V66 知識庫重製版")
+        st.caption("資料來源: Yahoo Finance / TWSE | V67 K線戰法版")
         is_live = c2.toggle("🔴 即時盤面", value=False)
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
     return is_live
@@ -62,14 +60,52 @@ def render_back_button(callback_func):
     if c2.button("⬅️ 返回列表", use_container_width=True):
         callback_func()
 
-# --- 3. 新手村卡片 (V66: 重寫渲染邏輯) ---
+# --- 3. 新手村卡片 ---
 def render_term_card(title, content):
     with st.container(border=True):
-        # 使用子標題讓名稱更突出
         st.subheader(f"📌 {title}")
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-        # 使用 markdown 並加入 class 以利 CSS 控制
         st.markdown(f"<div class='term-content'>{content}</div>", unsafe_allow_html=True)
+
+# --- V67 新增: K線型態繪圖卡片 ---
+def render_kline_pattern_card(title, pattern_data):
+    """
+    動態繪製 K 線型態教學卡片
+    """
+    desc = pattern_data['desc']
+    raw_data = pattern_data['data'] # 格式: [[O, H, L, C], ...]
+    
+    with st.container(border=True):
+        c1, c2 = st.columns([1, 1.2]) # 左圖右文
+        
+        with c1:
+            # 準備繪圖數據
+            idx = list(range(len(raw_data)))
+            opens = [x[0] for x in raw_data]
+            highs = [x[1] for x in raw_data]
+            lows = [x[2] for x in raw_data]
+            closes = [x[3] for x in raw_data]
+            
+            fig = go.Figure(data=[go.Candlestick(
+                x=idx, open=opens, high=highs, low=lows, close=closes,
+                increasing_line_color='#FF2B2B', # 台股紅
+                decreasing_line_color='#00E050'  # 台股綠
+            )])
+            
+            fig.update_layout(
+                margin=dict(l=5, r=5, t=5, b=5),
+                height=250,
+                xaxis=dict(visible=False), # 隱藏座標軸
+                yaxis=dict(visible=False),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                showlegend=False
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+        with c2:
+            st.subheader(f"💡 {title}")
+            st.markdown(desc)
 
 # --- 4. 簡介 ---
 def render_company_profile(summary):
@@ -97,25 +133,22 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         v4.metric("量能狀態", vol_status)
         v5.metric("外資持股", f"{foreign_held:.1f}%")
 
-# --- 6. 戰術建議生成 ---
+# --- 6. 戰術建議 ---
 def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="general"):
     pivot = (high + low + price) / 3
-    r1 = 2 * pivot - low
-    s1 = 2 * pivot - high
     
     action = "觀望"
     color_hex = "#aaaaaa"
-    
-    entry_price_txt = "-"
-    exit_price_txt = "-"
     target_price = 0.0
     stop_price = 0.0
-    reasoning = "數據盤整中"
+    entry_price_txt = "-"
+    exit_price_txt = "-"
     hold_time = "-"
+    reasoning = "數據盤整中"
 
     if strategy_type == 'day': 
         stop_price = low * 0.99
-        target_price = r1 if r1 > price else price * 1.02
+        target_price = high * 1.02
         hold_time = "當日沖銷"
         if price > m5 and price > pivot:
             action = "🔥 強力作多"; color_hex = "#FF2B2B"
@@ -129,8 +162,8 @@ def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="ge
             reasoning = "股價受制於樞紐之下，上方賣壓重，建議偏空思考。"
         else:
             action = "⚖️ 區間震盪"; color_hex = "#FF9F1C"
-            entry_price_txt = f"{s1:.1f} 支撐處"
-            exit_price_txt = f"{r1:.1f} 壓力處"
+            entry_price_txt = f"{low:.1f} 支撐處"
+            exit_price_txt = f"{high:.1f} 壓力處"
             reasoning = "多空膠著，建議區間來回操作或觀望。"
             
     elif strategy_type == 'short':
