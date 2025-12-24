@@ -3,10 +3,28 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 
-# --- CSS: V67 優化 ---
+# --- CSS: V68 排版微調 (針對K線教學優化) ---
 def inject_custom_css():
     st.markdown("""
         <style>
+        /* V68: 調整 K線卡片的標題間距 */
+        .kline-card-header {
+            margin-top: 0.5rem !important;
+            margin-bottom: 0.2rem !important;
+            font-size: 1.1rem !important;
+            font-weight: bold;
+        }
+        /* V68: 優化列表樣式 */
+        .action-list ul {
+            padding-left: 1.2rem !important;
+            margin-bottom: 0rem !important;
+        }
+        .action-list li {
+            margin-bottom: 0.3rem !important;
+            line-height: 1.5 !important;
+        }
+        
+        /* 原有樣式保留 */
         div[data-testid="stVerticalBlock"] > div {
             padding-top: 0.1rem;
             padding-bottom: 0.1rem;
@@ -16,9 +34,6 @@ def inject_custom_css():
             height: auto !important;
             padding-top: 0.2rem !important;
             padding-bottom: 0.2rem !important;
-        }
-        .stCaption {
-            font-size: 0.95rem !important; 
         }
         div[data-testid="stMetricValue"] {
             font-size: 1.25rem !important;
@@ -48,7 +63,7 @@ def render_header(title, show_monitor=False):
     c1.title(title)
     is_live = False
     if show_monitor:
-        st.caption("資料來源: Yahoo Finance / TWSE | V67 K線戰法版")
+        st.caption("資料來源: Yahoo Finance / TWSE | V68 K線戰法極致版")
         is_live = c2.toggle("🔴 即時盤面", value=False)
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
     return is_live
@@ -67,45 +82,58 @@ def render_term_card(title, content):
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         st.markdown(f"<div class='term-content'>{content}</div>", unsafe_allow_html=True)
 
-# --- V67 新增: K線型態繪圖卡片 ---
+# --- V68 大改版: K線型態繪圖卡片 (縮小圖表 + 詳細解說) ---
 def render_kline_pattern_card(title, pattern_data):
     """
-    動態繪製 K 線型態教學卡片
+    V68: 動態繪製更緊湊的 K 線圖，並顯示詳細的分段解說與色彩註記。
     """
-    desc = pattern_data['desc']
-    raw_data = pattern_data['data'] # 格式: [[O, H, L, C], ...]
+    # 從新的資料結構中讀取各部分
+    morph = pattern_data.get('morphology', '無資料')
+    psycho = pattern_data.get('psychology', '無資料')
+    action_html = pattern_data.get('action', '無資料')
+    raw_data = pattern_data.get('data', [])
     
     with st.container(border=True):
-        c1, c2 = st.columns([1, 1.2]) # 左圖右文
+        # V68 關鍵修改: 調整欄位比例，讓圖更窄，文字更寬 [1, 2.5]
+        c1, c2 = st.columns([1, 2.5]) 
         
         with c1:
             # 準備繪圖數據
             idx = list(range(len(raw_data)))
-            opens = [x[0] for x in raw_data]
-            highs = [x[1] for x in raw_data]
-            lows = [x[2] for x in raw_data]
-            closes = [x[3] for x in raw_data]
+            opens = [x[0] for x in raw_data]; highs = [x[1] for x in raw_data]
+            lows = [x[2] for x in raw_data]; closes = [x[3] for x in raw_data]
             
             fig = go.Figure(data=[go.Candlestick(
                 x=idx, open=opens, high=highs, low=lows, close=closes,
-                increasing_line_color='#FF2B2B', # 台股紅
-                decreasing_line_color='#00E050'  # 台股綠
+                increasing_line_color='#FF2B2B', decreasing_line_color='#00E050'
             )])
             
             fig.update_layout(
-                margin=dict(l=5, r=5, t=5, b=5),
-                height=250,
-                xaxis=dict(visible=False), # 隱藏座標軸
-                yaxis=dict(visible=False),
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                showlegend=False
+                margin=dict(l=2, r=2, t=10, b=2), # 邊距縮到最小
+                height=180, # V68 關鍵修改: 高度縮小 (原250)
+                xaxis=dict(visible=False, fixedrange=True), 
+                yaxis=dict(visible=False, fixedrange=True),
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                showlegend=False, dragmode=False # 禁止拖動
             )
-            st.plotly_chart(fig, use_container_width=True)
+            # 在左側欄位垂直置中顯示圖表
+            st.write("") # 墊高
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
             
         with c2:
-            st.subheader(f"💡 {title}")
-            st.markdown(desc)
+            # V68: 使用自定義 CSS class 渲染標題
+            st.markdown(f"### 💡 {title}")
+            st.markdown("<hr class='compact'>", unsafe_allow_html=True)
+            
+            st.markdown("<div class='kline-card-header'>【型態特徵】</div>", unsafe_allow_html=True)
+            st.caption(morph)
+            
+            st.markdown("<div class='kline-card-header'>【多空心理】</div>", unsafe_allow_html=True)
+            st.caption(psycho)
+            
+            st.markdown("<div class='kline-card-header'>【實戰操作建議】</div>", unsafe_allow_html=True)
+            # V68 關鍵: 使用 unsafe_allow_html=True 渲染帶有顏色的 HTML 列表
+            st.markdown(f"<div class='action-list'>{action_html}</div>", unsafe_allow_html=True)
 
 # --- 4. 簡介 ---
 def render_company_profile(summary):
@@ -136,19 +164,22 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
 # --- 6. 戰術建議 ---
 def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="general"):
     pivot = (high + low + price) / 3
+    r1 = 2 * pivot - low
+    s1 = 2 * pivot - high
     
     action = "觀望"
     color_hex = "#aaaaaa"
-    target_price = 0.0
-    stop_price = 0.0
+    
     entry_price_txt = "-"
     exit_price_txt = "-"
-    hold_time = "-"
+    target_price = 0.0
+    stop_price = 0.0
     reasoning = "數據盤整中"
+    hold_time = "-"
 
     if strategy_type == 'day': 
         stop_price = low * 0.99
-        target_price = high * 1.02
+        target_price = r1 if r1 > price else price * 1.02
         hold_time = "當日沖銷"
         if price > m5 and price > pivot:
             action = "🔥 強力作多"; color_hex = "#FF2B2B"
@@ -162,8 +193,8 @@ def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="ge
             reasoning = "股價受制於樞紐之下，上方賣壓重，建議偏空思考。"
         else:
             action = "⚖️ 區間震盪"; color_hex = "#FF9F1C"
-            entry_price_txt = f"{low:.1f} 支撐處"
-            exit_price_txt = f"{high:.1f} 壓力處"
+            entry_price_txt = f"{s1:.1f} 支撐處"
+            exit_price_txt = f"{r1:.1f} 壓力處"
             reasoning = "多空膠著，建議區間來回操作或觀望。"
             
     elif strategy_type == 'short':
