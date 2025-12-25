@@ -9,10 +9,12 @@ import os
 from PIL import Image, ImageOps, ImageEnhance
 import pytesseract
 import importlib
+from datetime import datetime, time as dt_time, timedelta, timezone # V74: 新增時間模組
 
 import stock_db as db
 import stock_ui as ui
 
+# 載入知識庫 (維持自動熱更新)
 try:
     import knowledge
     importlib.reload(knowledge)
@@ -20,8 +22,33 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V72", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V74", layout="wide")
 
+# --- V74 新增: 台股交易時間檢查邏輯 ---
+def check_market_hours():
+    """
+    檢查現在是否為台股交易時間 (含試撮): 08:30 ~ 13:30
+    週六週日不開盤 (暫不考慮國定假日，以週間判斷)
+    """
+    # 設定台灣時區 (UTC+8)
+    tz = timezone(timedelta(hours=8))
+    now = datetime.now(tz)
+    
+    # 判斷是否為平日 (0=週一, 4=週五, 5=週六, 6=週日)
+    if now.weekday() > 4:
+        return False, "今日為週末休市"
+        
+    # 判斷時間範圍 (08:30 - 13:30)
+    current_time = now.time()
+    start_time = dt_time(8, 30) # 試撮開始
+    end_time = dt_time(13, 30)  # 收盤
+    
+    if start_time <= current_time <= end_time:
+        return True, "市場開盤中"
+    else:
+        return False, f"目前非交易時間 ({now.strftime('%H:%M')})"
+
+# --- 初始化 State (不可簡化) ---
 defaults = {
     'view_mode': 'welcome', 'user_id': None, 'page_stack': ['welcome'],
     'current_stock': "", 'current_name': "", 'scan_pool': [], 'filtered_pool': [],      
@@ -40,6 +67,7 @@ if not st.session_state['scan_pool']:
     except:
         st.session_state['scan_pool'] = ['2330', '2317']; st.session_state['all_groups'] = ["全部"]
 
+# --- 核心邏輯函式 (維持原樣，不可簡化) ---
 def solve_stock_id(val):
     val = str(val).strip()
     if not val: return None, None
@@ -110,6 +138,7 @@ def handle_search():
         if code: nav_to('analysis', code, name); st.session_state.search_input_val = ""
         else: st.toast(f"找不到代號 '{raw}'", icon="⚠️")
 
+# --- Sidebar (V74: 新增強勢股按鈕與時間檢查) ---
 with st.sidebar:
     st.title("🎮 戰情控制台")
     uid = st.session_state['user_id']
@@ -127,11 +156,46 @@ with st.sidebar:
             "🏆 熱門強勢 (人氣指標)": "top"
         }
         sel_strat_name = st.selectbox("2️⃣ 選擇策略", list(strat_map.keys()))
+        
+        # 這裡的一般掃描按鈕保留，但如果您希望連這裡也限制，可以在下面加判斷
+        # 目前依照需求，主要限制「熱門強勢」的掃描，或全面限制
+        # 為符合「開盤時間才可以掃描並且搜尋」的強力要求，我們在此加上限制
+        
         if st.button("🚀 啟動掃描 (最少20檔)", use_container_width=True):
-            st.session_state['scan_target_group'] = sel_group; st.session_state['current_stock'] = strat_map[sel_strat_name]
-            st.session_state['scan_results'] = []; nav_to('scan', strat_map[sel_strat_name]); st.rerun()
+            # 檢查時間
+            is_open, msg = check_market_hours()
+            # 如果是「熱門強勢」或「強力當沖」，強烈建議在盤中掃描
+            # 若使用者堅持要掃描歷史數據 (例如盤後)，這裡可以放行，但根據您的需求是「修改成開盤時間才可以」
+            # 因此我們嚴格執行：若選 top/day 且非開盤，則禁止
+            
+            strict_modes = ["top", "day"]
+            current_mode_code = strat_map[sel_strat_name]
+            
+            if current_mode_code in strict_modes and not is_open:
+                st.error(f"⛔ {msg}：此策略需即時數據，請於 08:30-13:30 使用。")
+            else:
+                # 其他模式或開盤時間，允許掃描
+                st.session_state['scan_target_group'] = sel_group
+                st.session_state['current_stock'] = current_mode_code
+                st.session_state['scan_results'] = []
+                nav_to('scan', current_mode_code)
+                st.rerun()
 
-    if st.button("🔄 更新精選池"): db.update_top_100(); st.toast("更新完成", icon="✅")
+    # V74: 替換原本的「更新精選池」按鈕
+    # 變更為「當日強勢股票」，且嚴格限制時間
+    if st.button("🔥 當日強勢股票 (開盤限定)"):
+        is_open, msg = check_market_hours()
+        if is_open:
+            st.toast("🚀 正在鎖定當日強勢股...", icon="🔥")
+            # 設定為掃描全部 + 熱門強勢
+            st.session_state['scan_target_group'] = "🔍 全部上市櫃"
+            st.session_state['current_stock'] = "top"
+            st.session_state['scan_results'] = [] # 清空舊資料
+            nav_to('scan', 'top') # 跳轉並自動開始
+            st.rerun()
+        else:
+            st.error(f"⛔ {msg}：請於 08:30 ~ 13:30 之間使用此功能，以獲取精準當日數據。")
+
     st.divider()
     if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
     if st.button("🔒 個人自選股"): nav_to('watch'); st.rerun()
@@ -142,17 +206,18 @@ with st.sidebar:
     else:
         if st.button("🚪 登出系統"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 72.0 (5日K線戰法版)")
+    st.markdown("---"); st.caption("Ver: 74.0 (開盤限定戰略版)")
 
+# --- 主畫面邏輯 (維持完整) ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V72")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V74")
     st.markdown("""
-    ### 🚀 V72 更新：5日 K 線戰法
-    * **🧠 深度分析**：AI 現在會分析過去 5 天的 K 線排列，識別「晨星」、「吞噬」、「紅三兵」等複雜型態。
-    * **🎨 視覺戰報**：多方訊號紅底顯示，空方訊號綠底顯示，操作建議更直觀。
-    * **🔴 自動刷新**：支援即時盤面監控。
+    ### 🚀 V74 更新：開盤限定戰略
+    * **⏰ 時光守門員**：新增「當日強勢股票」功能，僅限 08:30-13:30 開放，確保數據即時性。
+    * **🔥 即時戰況**：結合週轉率與 K 線型態，在盤中提供最強力的輔助判斷。
+    * **📊 完整功能**：保留所有 OCR、詳細診斷與教學內容。
     """)
     c1, c2 = st.columns(2)
     with c1:
@@ -235,7 +300,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V72)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V74)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
