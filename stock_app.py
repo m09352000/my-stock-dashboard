@@ -14,6 +14,7 @@ from datetime import datetime, time as dt_time, timedelta, timezone
 import stock_db as db
 import stock_ui as ui
 
+# 載入知識庫
 try:
     import knowledge
     importlib.reload(knowledge)
@@ -21,67 +22,50 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V76", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V77", layout="wide")
 
-# --- V76 核心: 全域即時數據注入引擎 ---
+# --- V76 核心: 全域即時數據注入引擎 (維持 V76) ---
 def inject_realtime_data(df, code):
-    """
-    抓取 twstock.realtime 並覆蓋歷史資料的最後一筆，實現 1秒 完美連動
-    """
     if df is None or df.empty:
         return df, None, None
-        
-    realtime_data_pack = None # 用來傳給 UI 顯示數字
-    
+    realtime_data_pack = None 
     try:
-        # 抓取即時報價
         real = twstock.realtime.get(code)
-        
         if real['success']:
             rt = real['realtime']
-            
-            # 檢查是否為有效交易資料 (有些冷門股盤中可能無成交)
             if rt['latest_trade_price'] == '-' or rt['latest_trade_price'] is None:
                 return df, None, None
-                
             latest_price = float(rt['latest_trade_price'])
             high = float(rt['high'])
             low = float(rt['low'])
             open_p = float(rt['open'])
-            vol = float(rt['accumulate_trade_volume']) # 累積成交量 (張)
+            vol = float(rt['accumulate_trade_volume']) 
             
-            # 準備傳給 UI 的數據包
             realtime_data_pack = {
                 'latest_trade_price': latest_price,
                 'high': high,
                 'low': low,
                 'open': open_p,
                 'accumulate_trade_volume': vol,
-                'previous_close': float(df['Close'].iloc[-2]) if len(df) > 1 else open_p # 昨收用歷史資料比較準
+                'previous_close': float(df['Close'].iloc[-2]) if len(df) > 1 else open_p
             }
             
-            # 修改 DataFrame 最後一筆資料 (覆蓋模式)
-            # 這樣 K 線圖最後一根就會跳動
+            # 覆蓋 DataFrame 最後一筆
             last_idx = df.index[-1]
             df.at[last_idx, 'Close'] = latest_price
-            df.at[last_idx, 'High'] = max(high, df.at[last_idx, 'High']) # 取即時與歷史的最大值，避免數據回朔
+            df.at[last_idx, 'High'] = max(high, df.at[last_idx, 'High'])
             df.at[last_idx, 'Low'] = min(low, df.at[last_idx, 'Low'])
-            df.at[last_idx, 'Volume'] = int(vol) * 1000 # 轉換為股數 (假設歷史資料是股數)
+            df.at[last_idx, 'Volume'] = int(vol) * 1000 
             
-            # 提取最佳五檔
             bid_ask = {
                 'bid_price': rt.get('best_bid_price', []),
                 'bid_volume': rt.get('best_bid_volume', []),
                 'ask_price': rt.get('best_ask_price', []),
                 'ask_volume': rt.get('best_ask_volume', [])
             }
-            
             return df, bid_ask, realtime_data_pack
-            
     except Exception as e:
-        # print(f"Realtime Error: {e}") # Debug 用
         return df, None, None
-        
     return df, None, None
 
 def check_market_hours():
@@ -233,17 +217,18 @@ with st.sidebar:
     else:
         if st.button("🚪 登出系統"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 76.0 (全域即時連動版)")
+    st.markdown("---"); st.caption("Ver: 77.0 (邏輯順序修正版)")
 
+# --- 主畫面邏輯 ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V76")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V77")
     st.markdown("""
-    ### 🚀 V76 更新：1秒全域連動引擎
+    ### 🚀 V77 更新：即時連動修正
+    * **✅ 邏輯順序修復**：修正 V76 導致的數據未讀取即刷新的問題，現在數據會正確顯示。
     * **⚡ 1秒極速刷新**：啟動後每秒自動同步，實現看盤軟體般的流暢度。
     * **🔗 全域數據連動**：股價、K線圖、成交量、AI 分析全部與即時報價同步。
-    * **📈 零延遲體驗**：即時買賣盤五檔監控，決策更精準。
     """)
     c1, c2 = st.columns(2)
     with c1:
@@ -326,7 +311,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V76)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V77)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
@@ -335,7 +320,6 @@ elif mode == 'watch':
                     full_id, _, d, src = db.get_stock_data(code)
                     n = twstock.codes[code].name if code in twstock.codes else code
                     if d is not None:
-                        # V76: 自選股即時連動
                         d_real, _, _ = inject_realtime_data(d, code)
                         curr = d_real['Close'].iloc[-1] if isinstance(d_real, pd.DataFrame) else d_real['Close']
                         if ui.render_detailed_card(code, n, curr, d_real, src, key_prefix="watch", strategy_info="自選觀察"): nav_to('analysis', code, n); st.rerun()
@@ -345,19 +329,15 @@ elif mode == 'watch':
 elif mode == 'analysis':
     code = st.session_state['current_stock']; name = st.session_state['current_name']
     
-    # V76: 啟動開關與狀態
+    # 1. 渲染 Header，獲取開關狀態
     is_live = ui.render_header(f"{name} {code}", show_monitor=True)
     
-    # V76: 1秒極速刷新
-    if is_live:
-        time.sleep(1) # 改為 1 秒
-        st.rerun()
-        
+    # 2. 獲取資料 (這裡不管 is_live 為何都要執行，確保有資料可顯示)
     full_id, stock, df, src = db.get_stock_data(code)
     
     if src == "fail": st.error("查無資料")
     elif src == "yahoo":
-        # V76: 注入並獲取即時數據包
+        # 3. 注入即時資料
         df, bid_ask_data, realtime_data = inject_realtime_data(df, code)
         
         info = stock.info
@@ -374,9 +354,9 @@ elif mode == 'analysis':
         fh = info.get('heldPercentInstitutions', 0)*100
         color_settings = db.get_color_settings(code)
 
+        # 4. 渲染所有元件
         ui.render_company_profile(db.translate_text(info.get('longBusinessSummary','')))
         
-        # V76: 傳入 realtime_data 確保數字絕對同步
         ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vt, vy, va, vs, fh, 
                                     turnover_rate, bid_ask_data, color_settings, realtime_data)
         
@@ -389,10 +369,15 @@ elif mode == 'analysis':
         
         ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df)
         
+        # 5. V77 關鍵修正：將刷新邏輯放在最後
+        if is_live:
+            time.sleep(1) # 等待 1 秒
+            st.rerun()    # 重新執行整個 script
+        
     elif src == "twse": st.metric("現價", f"{df['Close']}")
     ui.render_back_button(go_back)
 
-# (learn, chat, scan 等區塊維持 V75 不變，請保留即可)
+# (其餘區塊 learn, chat, scan 維持 V76 不變)
 elif mode == 'learn':
     ui.render_header("📖 股市新手村"); t1, t2, t3 = st.tabs(["策略說明", "名詞解釋", "🕯️ K線型態"])
     with t1: st.markdown(STRATEGY_DESC)
@@ -444,7 +429,6 @@ elif mode == 'scan':
             try:
                 fid, _, d, src = db.get_stock_data(c)
                 if d is not None:
-                    # V76: 掃描也注入即時資料
                     d_real, _, _ = inject_realtime_data(d, c)
                     n = twstock.codes[c].name if c in twstock.codes else c
                     p = d_real['Close'].iloc[-1] if isinstance(d_real, pd.DataFrame) else d_real['Close']
@@ -488,7 +472,6 @@ elif mode == 'scan':
          for i, c in enumerate(saved_codes[:50]):
              fid, _, d, src = db.get_stock_data(c)
              if d is not None:
-                 # V76: 顯示時注入即時資料
                  d_real, _, _ = inject_realtime_data(d, c)
                  p = d_real['Close'].iloc[-1] if isinstance(d_real, pd.DataFrame) else d_real['Close']
                  n = twstock.codes[c].name if c in twstock.codes else c
