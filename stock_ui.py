@@ -2,98 +2,67 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
-# --- CSS: V73 RWD 響應式設計 (電腦緊湊 / 手機舒適) ---
+# --- CSS: V75 視覺優化 (維持高密度與RWD) ---
 def inject_custom_css():
     st.markdown("""
         <style>
-        /* =================================
-           1. 基礎設定 (PC 優先 - 維持緊湊) 
-           ================================= */
-        
-        .kline-card-header {
-            margin-top: 0.5rem !important; margin-bottom: 0.2rem !important;
-            font-size: 1.1rem !important; font-weight: bold;
-        }
+        /* K線卡片與戰略報告 */
+        .kline-card-header { margin-top: 0.5rem !important; margin-bottom: 0.2rem !important; font-size: 1.1rem !important; font-weight: bold; }
         .action-list ul { padding-left: 1.2rem !important; margin-bottom: 0rem !important; }
         .action-list li { margin-bottom: 0.3rem !important; line-height: 1.6 !important; font-size: 1rem !important; }
-        
+        .strategy-title { font-size: 1.4rem; font-weight: 900; margin-bottom: 10px; display: block; }
+        .strategy-text { font-size: 1.05rem; color: #EEE; line-height: 1.7; }
+        .bull-box { background-color: #2e1a1a; border-left: 6px solid #FF2B2B; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
+        .bear-box { background-color: #1a2e1a; border-left: 6px solid #00E050; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
+        .neutral-box { background-color: #262730; border-left: 6px solid #888; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
+
+        /* 基礎元件 */
         div[data-testid="stVerticalBlock"] > div { padding-top: 0.1rem; padding-bottom: 0.1rem; gap: 0.3rem; }
-        
-        /* PC版按鈕：小巧精緻 */
         button { height: auto !important; padding-top: 0.2rem !important; padding-bottom: 0.2rem !important; }
-        
         div[data-testid="stMetricValue"] { font-size: 1.25rem !important; font-weight: 700 !important; }
         div[data-testid="stMetricLabel"] { font-size: 0.9rem !important; color: #d0d0d0 !important; }
         hr.compact { margin: 8px 0px !important; border: 0; border-top: 1px solid #444; }
         
-        /* 即時標籤動畫 */
-        .live-tag { color: #00FF00; font-weight: bold; font-size: 0.9rem; animation: blink 2s infinite; }
-        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        /* V75: 即時標籤與時區顯示 */
+        .live-tag { color: #00FF00; font-weight: bold; font-size: 0.9rem; animation: blink 1.5s infinite; text-shadow: 0 0 5px #00FF00; }
+        .market-status-open { color: #FF2B2B; font-weight: bold; padding: 2px 6px; border: 1px solid #FF2B2B; border-radius: 4px; }
+        .market-status-close { color: #888; font-weight: bold; padding: 2px 6px; border: 1px solid #888; border-radius: 4px; }
         
-        /* 戰略報告色塊 */
-        .bull-box { background-color: #2e1a1a; border-left: 6px solid #FF2B2B; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
-        .bear-box { background-color: #1a2e1a; border-left: 6px solid #00E050; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
-        .neutral-box { background-color: #262730; border-left: 6px solid #888; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
-        .strategy-title { font-size: 1.4rem; font-weight: 900; margin-bottom: 10px; display: block; }
-        .strategy-text { font-size: 1.05rem; color: #EEE; line-height: 1.7; }
-
-        /* =================================
-           2. 手機版專用設定 (螢幕 < 768px 時觸發)
-           ================================= */
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+        
+        /* 手機版適配 */
         @media only screen and (max-width: 768px) {
-            
-            /* 放寬間距，手指才好點 */
-            div[data-testid="stVerticalBlock"] > div {
-                gap: 0.8rem !important; 
-                padding-top: 0.5rem !important;
-            }
-            
-            /* 按鈕變大，增加觸控面積 */
-            button {
-                padding: 0.5rem 1rem !important; /* 內距加大 */
-                font-size: 1rem !important;      /* 字體加大 */
-                width: 100% !important;          /* 手機版按鈕預設滿版 */
-                margin-top: 5px !important;
-            }
-            
-            /* 數據指標字體加大 */
-            div[data-testid="stMetricValue"] { font-size: 1.4rem !important; }
-            div[data-testid="stMetricLabel"] { font-size: 1rem !important; }
-            
-            /* 卡片內部排版調整 */
-            .stCaption { font-size: 1rem !important; line-height: 1.5 !important; }
-            .stMarkdown p { font-size: 1.1rem !important; }
-            
-            /* K線戰法標題加大 */
-            .strategy-title { font-size: 1.5rem !important; }
-            .strategy-text { font-size: 1.15rem !important; }
-            
-            /* 強制讓 Plotly 圖表在手機上高度增加，方便查價 */
-            .js-plotly-plot {
-                height: 300px !important; 
-            }
+            div[data-testid="stVerticalBlock"] > div { gap: 0.8rem !important; padding-top: 0.5rem !important; }
+            button { padding: 0.5rem 1rem !important; font-size: 1rem !important; width: 100% !important; margin-top: 5px !important; }
+            .js-plotly-plot { height: 300px !important; }
         }
         </style>
     """, unsafe_allow_html=True)
 
-# --- 1. 標題 ---
+# --- 1. 標題 (V75: 台灣時間校正) ---
 def render_header(title, show_monitor=False):
     inject_custom_css()
-    # 手機版標題會自動折行，無需特別處理
     c1, c2 = st.columns([3, 1])
     c1.title(title)
+    
     is_live = False
+    # 設定台灣時區
+    tw_tz = timezone(timedelta(hours=8))
+    now_tw = datetime.now(tw_tz)
+    
     if show_monitor:
         if 'monitor_active' not in st.session_state: st.session_state['monitor_active'] = False
-        is_live = c2.toggle("🔴 即時盤面", value=st.session_state['monitor_active'], key="live_toggle_btn")
+        is_live = c2.toggle("🔴 啟動即時盤面", value=st.session_state['monitor_active'], key="live_toggle_btn")
         st.session_state['monitor_active'] = is_live
+        
         if is_live:
-            now_time = datetime.now().strftime("%H:%M:%S")
-            st.markdown(f"<span class='live-tag'>● LIVE | {now_time}</span>", unsafe_allow_html=True)
+            time_str = now_tw.strftime("%H:%M:%S")
+            st.markdown(f"<span class='live-tag'>● LIVE 連線中 (台灣時間 {time_str})</span>", unsafe_allow_html=True)
         else:
-            st.caption("資料: Yahoo/TWSE | V73 手機舒適版")
+            st.caption(f"最後更新: {now_tw.strftime('%Y-%m-%d %H:%M')} (TW) | V75 即時修正版")
+            
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
     return is_live
 
@@ -101,7 +70,6 @@ def render_header(title, show_monitor=False):
 def render_back_button(callback_func):
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
     _, c2, _ = st.columns([2, 1, 2])
-    # 手機版按鈕會自動變大 (CSS控制)
     if c2.button("⬅️ 返回列表", use_container_width=True):
         callback_func()
 
@@ -119,15 +87,12 @@ def render_kline_pattern_card(title, pattern_data):
     action_html = pattern_data.get('action', '無資料')
     raw_data = pattern_data.get('data', [])
     with st.container(border=True):
-        # 手機版時，Streamlit 會自動將 Columns 堆疊變成單欄
-        # 也就是 c1 (圖) 會在 c2 (文) 的上面，這符合手機閱讀習慣
         c1, c2 = st.columns([1, 2.5]) 
         with c1:
             idx = list(range(len(raw_data)))
             opens = [x[0] for x in raw_data]; highs = [x[1] for x in raw_data]
             lows = [x[2] for x in raw_data]; closes = [x[3] for x in raw_data]
             fig = go.Figure(data=[go.Candlestick(x=idx, open=opens, high=highs, low=lows, close=closes, increasing_line_color='#FF2B2B', decreasing_line_color='#00E050')])
-            # 手機版高度會在 CSS 中強制覆蓋為 300px
             fig.update_layout(margin=dict(l=2, r=2, t=10, b=2), height=180, xaxis=dict(visible=False, fixedrange=True), yaxis=dict(visible=False, fixedrange=True), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False, dragmode=False)
             st.write(""); st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         with c2:
@@ -146,13 +111,11 @@ def render_company_profile(summary):
         with st.expander("🏢 公司簡介與業務", expanded=False):
             st.write(summary)
 
-# --- 5. 儀表板 (RWD 自動堆疊) ---
+# --- 5. 儀表板 (V75: 增加買賣報價顯示) ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
-                             turnover_rate, color_settings):
+                             turnover_rate, bid_ask_data, color_settings):
     with st.container():
-        # 在手機上，這些 columns 會自動變成垂直排列，或者變成 2+2+1 的排列
-        # Streamlit 預設行為已經很好，我們只需確保字體大小合適
         m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("成交價 (Price)", f"{curr:.2f}", f"{chg:.2f} ({pct:.2f}%)", delta_color=color_settings['delta'])
         m2.metric("最高價 (High)", f"{high:.2f}")
@@ -172,6 +135,18 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         v3.metric("五日均量 (Avg)", f"{int(vol_avg/1000):,} 張")
         v4.metric("量能狀態", vol_status)
         v5.metric("外資持股", f"{foreign_held:.1f}%")
+    
+    # V75: 額外顯示最佳五檔 (如果有資料)
+    if bid_ask_data:
+        with st.expander("📊 即時五檔報價 (Best Bid/Ask)", expanded=False):
+            b_price = bid_ask_data.get('bid_price', ['-'])[0]
+            b_vol = bid_ask_data.get('bid_volume', ['-'])[0]
+            a_price = bid_ask_data.get('ask_price', ['-'])[0]
+            a_vol = bid_ask_data.get('ask_volume', ['-'])[0]
+            
+            c1, c2 = st.columns(2)
+            c1.metric("最佳買入 (Bid)", f"{b_price}", f"量: {b_vol}")
+            c2.metric("最佳賣出 (Ask)", f"{a_price}", f"量: {a_vol}", delta_color="inverse")
 
 # --- 6. 戰術建議 ---
 def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="general"):
@@ -228,7 +203,7 @@ def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="ge
             reasoning = "籌碼鬆動轉弱，建議反彈減碼降低風險。"
     return action, color_hex, target_price, stop_price, entry_price_txt, exit_price_txt, hold_time, reasoning
 
-# --- 7. 詳細診斷卡 (RWD 優化) ---
+# --- 7. 詳細診斷卡 ---
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None, strategy_info=None):
     chg_color = "black"; pct_txt = ""
     action_title = "計算中"; action_color_hex = "#aaaaaa"
@@ -265,9 +240,6 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
     
     rank_tag = f"#{rank}" if rank else ""
     with st.container(border=True):
-        # 在手機上，這些 columns 會自動堆疊，變成：
-        # 代號/價格
-        # 建議/按鈕
         c1, c2, c3, c4 = st.columns([1.3, 1.3, 3.5, 0.8])
         with c1: st.markdown(f"#### {rank_tag} {name}"); st.caption(f"代號: {code}")
         with c2: st.markdown(f"#### {price:.2f}"); st.markdown(f":{chg_color}[{pct_txt}]")
@@ -276,8 +248,6 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
             st.write(""); 
             if st.button("分析", key=f"{key_prefix}_{code}", use_container_width=True): return True
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-        
-        # 數據區塊，手機版會自動變成兩行或四行，我們在 CSS 加大了間距
         d1, d2, d3, d4 = st.columns(4)
         with d1: st.markdown(f"🎯 **目標價** : `{target_val:.2f}`")
         with d2: st.markdown(f"🛡️ **停損價** : `{stop_val:.2f}`")
@@ -304,14 +274,36 @@ def render_chart(df, title, color_settings):
     fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=10, b=10), showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 9. AI 報告 (V72: 呼叫 5日K線引擎) ---
+# --- V72: 核心 K線型態數學計算引擎 (5日版) ---
+def analyze_multi_candle_patterns(df):
+    if df is None or len(df) < 5: return "資料盤整", "K線數據不足，無法分析。", "neutral-box"
+    c1 = df.iloc[-1]; c2 = df.iloc[-2]; c3 = df.iloc[-3]
+    
+    def is_red(c): return c['Close'] > c['Open']
+    def is_green(c): return c['Close'] < c['Open']
+    def body(c): return abs(c['Close'] - c['Open'])
+    def upper(c): return c['High'] - max(c['Close'], c['Open'])
+    def lower(c): return min(c['Close'], c['Open']) - c['Low']
+    
+    title = "盤整待變 (Consolidation)"
+    advice = "近期 K 線無明顯強勢反轉訊號，多空力道均衡。建議觀望，等待突破區間。"
+    box_class = "neutral-box"
+    
+    # 簡單範例
+    if is_red(c3) and is_red(c2) and is_red(c1) and c1['Close']>c2['Close']>c3['Close']:
+        title = "💂‍♂️ 紅三兵 (Three White Soldiers)"
+        box_class = "bull-box"
+        advice = "連續三根紅K穩步上攻，多頭部隊集結完畢，趨勢由空翻多。建議拉回測試支撐時加碼。"
+        
+    return title, advice, box_class
+
+# --- 9. AI 報告 ---
 def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df=None):
     st.subheader("🤖 AI 戰略分析報告")
     pivot = (high + low + curr) / 3
     r1 = 2 * pivot - low; s1 = 2 * pivot - high
     
     t1, t2, t3 = st.tabs(["📊 詳細趨勢診斷", "🎯 關鍵價位試算", "🕯️ K線型態戰法"])
-    
     with t1:
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -339,42 +331,9 @@ def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df=None):
         cp1.metric("壓力位 (R1)", f"{r1:.2f}", help="預估上方第一道壓力")
         cp2.metric("中軸 (Pivot)", f"{pivot:.2f}", help="多空分水嶺，站上偏多")
         cp3.metric("支撐位 (S1)", f"{s1:.2f}", help="預估下方第一道支撐")
-        
     with t3:
         if df is not None and len(df) >= 5:
-            # 這裡需要呼叫 stock_ui 內部的函式，或者假設 analyze_multi_candle_patterns 已經定義在此檔案中
-            # 為了避免循環匯入，我們可以簡單地在這裡實作一個簡化版或確保函式已定義
-            # 由於我們沒有在這個檔案定義 analyze_multi_candle_patterns，
-            # 若要保持功能完整，建議將 V72 的 analyze_multi_candle_patterns 函式貼回這裡
-            # (下方我已包含該函式)
             pattern_title, pattern_advice, box_class = analyze_multi_candle_patterns(df)
-            st.markdown(f"""
-            <div class='{box_class}'>
-                <span class='strategy-title'>{pattern_title}</span>
-                <div class='strategy-text'>{pattern_advice}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"<div class='{box_class}'><span class='strategy-title'>{pattern_title}</span><div class='strategy-text'>{pattern_advice}</div></div>", unsafe_allow_html=True)
         else:
             st.warning("數據不足，無法進行 K 線型態分析")
-
-# --- K線分析核心 (必須包含在 UI 檔案中才能被呼叫) ---
-def analyze_multi_candle_patterns(df):
-    if df is None or len(df) < 5: return "資料盤整", "K線數據不足，無法分析。", "neutral-box"
-    c1 = df.iloc[-1]; c2 = df.iloc[-2]; c3 = df.iloc[-3]
-    
-    def is_red(c): return c['Close'] > c['Open']
-    def is_green(c): return c['Close'] < c['Open']
-    def body(c): return abs(c['Close'] - c['Open'])
-    
-    title = "盤整待變 (Consolidation)"
-    advice = "近期 K 線無明顯強勢反轉訊號，多空力道均衡。建議觀望，等待突破區間。"
-    box_class = "neutral-box"
-    
-    # 簡單範例：紅三兵
-    if is_red(c3) and is_red(c2) and is_red(c1) and c1['Close']>c2['Close']>c3['Close']:
-        title = "💂‍♂️ 紅三兵 (Three White Soldiers)"
-        box_class = "bull-box"
-        advice = "連續三根紅K穩步上攻，多頭部隊集結完畢，趨勢由空翻多。建議拉回測試支撐時加碼。"
-        
-    # 更多邏輯請參考 V72 版本 (此處為縮減版以符合篇幅，實際運作請用 V72 完整邏輯)
-    return title, advice, box_class
