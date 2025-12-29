@@ -3,159 +3,53 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 
-# --- CSS: V100 UI ---
-def inject_custom_css():
-    st.markdown("""
-        <style>
-        .stApp { font-family: "Microsoft JhengHei", sans-serif; }
-        .battle-card { background-color: #1e1e1e; padding: 20px; border-radius: 12px; border: 1px solid #333; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        .battle-title { font-size: 1.2rem; font-weight: 900; color: #fff; margin-bottom: 10px; border-bottom: 2px solid #444; padding-bottom: 5px; }
-        .rank-badge { display: flex; align-items: center; justify-content: center; width: 45px; height: 45px; border-radius: 50%; font-weight: 900; font-size: 1.4rem; color: #000; margin: auto; box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
-        .rank-1 { background: linear-gradient(135deg, #FFD700, #FDB931); border: 2px solid #FFF; box-shadow: 0 0 15px #FFD700; }
-        .rank-2 { background: linear-gradient(135deg, #E0E0E0, #B0B0B0); border: 2px solid #FFF; }
-        .rank-3 { background: linear-gradient(135deg, #CD7F32, #A0522D); border: 2px solid #FFF; }
-        .rank-norm { background-color: #333; color: #EEE; font-size: 1rem; width: 35px; height: 35px; }
-        .status-tag { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85rem; text-align: center; display: inline-block; }
-        
-        /* 深度報告文字樣式 */
-        .report-text { font-size: 1.05rem; line-height: 1.8; color: #E0E0E0; white-space: pre-wrap; }
-        </style>
-    """, unsafe_allow_html=True)
+# ... (CSS 與 Header 函式完全保留 V100 的版本) ...
 
-def render_header(title, show_monitor=False):
-    inject_custom_css()
-    c1, c2 = st.columns([3, 1])
-    c1.title(title)
-    if show_monitor:
-        if 'monitor_active' not in st.session_state: st.session_state['monitor_active'] = False
-        if c2.toggle("🔴 1秒極速刷新", value=st.session_state['monitor_active']):
-            st.session_state['monitor_active'] = True
-        else:
-            st.session_state['monitor_active'] = False
-    st.markdown("<hr style='margin: 8px 0px; border:0; border-top:1px solid #444;'>", unsafe_allow_html=True)
-
-def render_back_button(callback_func):
-    st.markdown("<hr style='margin: 8px 0px; border:0; border-top:1px solid #444;'>", unsafe_allow_html=True)
-    if st.button("⬅️ 返回", use_container_width=True): callback_func()
-
-def render_term_card(title, content):
-    with st.container(border=True):
-        st.subheader(f"📌 {title}"); st.markdown(content)
-
-def render_kline_pattern_card(title, pattern_data):
-    morph = pattern_data.get('morphology', '')
-    psycho = pattern_data.get('psychology', '')
-    action = pattern_data.get('action', '')
-    raw_data = pattern_data.get('data', [])
-    with st.container(border=True):
-        c1, c2 = st.columns([1, 2.5]) 
-        with c1:
-            idx = list(range(len(raw_data)))
-            opens = [x[0] for x in raw_data]; highs = [x[1] for x in raw_data]
-            lows = [x[2] for x in raw_data]; closes = [x[3] for x in raw_data]
-            fig = go.Figure(data=[go.Candlestick(x=idx, open=opens, high=highs, low=lows, close=closes, increasing_line_color='#FF2B2B', decreasing_line_color='#00E050')])
-            fig.update_layout(margin=dict(l=2, r=2, t=10, b=2), height=180, xaxis=dict(visible=False), yaxis=dict(visible=False), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False)
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        with c2:
-            st.markdown(f"### 💡 {title}")
-            st.markdown(f"**【形態特徵】** {morph}")
-            st.markdown(f"**【市場心理】**\n{psycho}")
-            st.markdown(f"**【操作 SOP】**\n👉 {action}")
-
-def render_company_profile(summary):
-    if summary:
-        with st.expander("🏢 公司簡介", expanded=False): st.write(summary)
-
-def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs, fh, tr, ba, cs, rt):
+# 僅需修改 render_metrics_dashboard 函式
+def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs, fh, tr, ba, cs, rt, unit="張", code=""):
     with st.container():
         c1, c2, c3, c4 = st.columns(4)
+        
+        # 漲跌顏色：為了不混淆，目前統一維持 紅漲綠跌 (若您想改美股綠漲，可在此修改)
         val_color = "#FF2B2B" if chg > 0 else "#00E050" if chg < 0 else "white"
+        
         c1.markdown(f"<div style='font-size:0.9rem; color:#aaa'>成交價</div><div style='font-size:2rem; font-weight:bold; color:{val_color}'>{curr:.2f} <span style='font-size:1rem'>({pct:+.2f}%)</span></div>", unsafe_allow_html=True)
-        c2.metric("最高", f"{high:.2f}"); c3.metric("最低", f"{low:.2f}"); c4.metric("成交量", f"{int(vol):,} 張")
+        c2.metric("最高", f"{high:.2f}")
+        c3.metric("最低", f"{low:.2f}")
+        
+        # 智能成交量顯示
+        vol_str = f"{int(vol):,}"
+        if unit == "股" and vol > 1000000: # 美股顯示 M
+            vol_str = f"{vol/1000000:.2f}M"
+            
+        c4.metric("成交量", f"{vol_str} {unit}")
+        
         st.markdown("<hr style='margin: 8px 0px; border:0; border-top:1px solid #444;'>", unsafe_allow_html=True)
         d1, d2, d3, d4 = st.columns(4)
-        d1.metric("振幅", f"{amp:.2f}%"); d2.metric("量能狀態", vs); d3.metric("五日均量", f"{int(va/1000)} 張"); d4.metric("昨日量", f"{int(vy/1000)} 張")
+        d1.metric("振幅", f"{amp:.2f}%")
+        d2.metric("量能狀態", vs)
+        
+        # 均量也做單位處理
+        va_val = va
+        if unit == "張": va_val = va / 1000
+        
+        va_str = f"{int(va_val):,}"
+        if unit == "股" and va_val > 1000000:
+            va_str = f"{va_val/1000000:.2f}M"
+            
+        d3.metric("五日均量", f"{va_str} {unit}")
+        
+        # 前日量 (美股前日 volume 也是股，台股是張)
+        vy_val = vy
+        if unit == "張": vy_val = vy / 1000
+        
+        vy_str = f"{int(vy_val):,}"
+        if unit == "股" and vy_val > 1000000:
+            vy_str = f"{vy_val/1000000:.2f}M"
+            
+        d4.metric("昨日量", f"{vy_str} {unit}")
 
-def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None, strategy_info=None, score=0, w_prob=50):
-    chg_color = "gray"; pct_txt = "0.00%"
-    if df is not None and not df.empty:
-        curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]
-        chg_val = curr - prev; pct = (chg_val / prev) * 100
-        if chg_val > 0: chg_color = "#FF2B2B"; pct_txt = f"▲{pct:.2f}%"
-        elif chg_val < 0: chg_color = "#00E050"; pct_txt = f"▼{abs(pct):.2f}%"
-    
-    rank_class = f"rank-{rank}" if rank and rank <= 3 else "rank-norm"
-    rank_content = f"{rank}" if rank else "-"
-    rank_html = f"<div class='rank-badge {rank_class}'>{rank_content}</div>"
-    
-    with st.container(border=True):
-        c1, c2, c3, c4 = st.columns([0.6, 2.0, 1.2, 1.0])
-        with c1: st.markdown(rank_html, unsafe_allow_html=True)
-        with c2: st.markdown(f"### {name}"); st.caption(f"代號: {code}")
-        with c3: st.markdown(f"<div style='text-align:right; font-weight:bold; font-size:1.2rem; color:{chg_color}'>{price:.2f}<br><span style='font-size:0.9rem'>{pct_txt}</span></div>", unsafe_allow_html=True)
-        with c4:
-            st.write("")
-            if st.button("查看", key=f"{key_prefix}_{code}", use_container_width=True): return True
-
-        st.markdown("<hr style='margin: 8px 0px; border:0; border-top:1px solid #444;'>", unsafe_allow_html=True)
-        d1, d2 = st.columns([3, 1])
-        with d1:
-            st.markdown(f"**🎯 理由：** {strategy_info}")
-            # 顯示本週勝率進度條
-            st.progress(w_prob/100, text=f"本週預估勝率: {w_prob}%")
-        with d2:
-            tag_color = "#FF0000" if score >= 80 else "#FFA500" if score >= 60 else "#888"
-            tag_text = "極強" if score >= 80 else "強勢" if score >= 60 else "普通"
-            st.markdown(f"<div class='status-tag' style='background-color:{tag_color}; color:white; width:100%; margin-top:10px;'>{tag_text}</div>", unsafe_allow_html=True)
-    return False
-
-def render_chart(df, title, color_settings):
-    df['MA5'] = df['Close'].rolling(5).mean()
-    df['MA20'] = df['Close'].rolling(20).mean()
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
-    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K線', increasing_line_color='#FF2B2B', decreasing_line_color='#00E050'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], line=dict(color='#FF00FF', width=1), name='5日線'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1), name='20日線'), row=1, col=1)
-    colors = ['#FF2B2B' if c >= o else '#00E050' for c, o in zip(df['Close'], df['Open'])]
-    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=2, col=1)
-    fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10))
-    st.plotly_chart(fig, use_container_width=True)
-
-def render_ai_battle_dashboard(analysis):
-    st.markdown("---")
-    st.subheader("🤖 AI 戰情診斷室 (V100 深度版)")
-    
-    # 1. 雙週期機率
-    c1, c2 = st.columns(2)
-    with c1:
-        w_prob = analysis.get('weekly_prob', 50)
-        w_color = "#FF2B2B" if w_prob > 70 else "#FFA500"
-        st.markdown(f"""
-        <div class="battle-card">
-            <div class="battle-title">📅 本週獲利機率 (短線)</div>
-            <div style="font-size: 2.5rem; color: {w_color}; font-weight: bold;">{w_prob}%</div>
-            <div style="color: #aaa; font-size: 0.9rem;">基於 5日線斜率與 RSI 動能</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with c2:
-        m_prob = analysis.get('monthly_prob', 50)
-        m_color = "#FF2B2B" if m_prob > 70 else "#FFA500"
-        st.markdown(f"""
-        <div class="battle-card">
-            <div class="battle-title">🌕 本月獲利機率 (波段)</div>
-            <div style="font-size: 2.5rem; color: {m_color}; font-weight: bold;">{m_prob}%</div>
-            <div style="color: #aaa; font-size: 0.9rem;">基於月季線排列與 MACD 趨勢</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # 2. 深度文字報告 (V100 重點)
-    st.markdown('<div class="battle-card"><div class="battle-title">📝 AI 深度技術分析報告</div>', unsafe_allow_html=True)
-    st.markdown(f"<div class='report-text'>{analysis.get('report', '分析中...')}</div>", unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # 3. 關鍵價位
-    st.markdown("#### 🛡️ 關鍵價位攻防")
-    st.table(pd.DataFrame({
-        "關卡": ["壓力 (布林上)", "現價", "建議進場", "支撐 (布林下)"],
-        "價格": [f"{analysis['pressure']:.2f}", f"{analysis['close']:.2f}", f"{analysis['suggest_price']:.2f}", f"{analysis['support']:.2f}"]
-    }))
+# ... (其他 render_detailed_card, render_chart 等函式完全保留 V100 的版本) ...
+# 注意：請確保將 V100 的 stock_ui.py 內容複製過來，只替換 render_metrics_dashboard
+# 為了完整性，這裡提供一個省略版指示，實際上您應該保留原本的完整代碼，只換這一個函式
+# 但為了方便您全選複製，您可以直接使用 V100 的 stock_ui.py，然後只改這一小段
