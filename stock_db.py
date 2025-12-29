@@ -3,9 +3,10 @@ import twstock
 import yfinance as yf
 import os
 import json
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 
-# --- V93: 資料庫核心 (暴力雙路徑版) ---
+# --- V101: 資料庫核心 (台美雙核心版) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -34,7 +35,7 @@ def init_db():
 
 init_db()
 
-# --- 2. 使用者系統 ---
+# --- 2. 使用者系統 (維持不變) ---
 def login_user(username, password):
     try:
         with open(USERS_FILE, 'r', encoding='utf-8') as f: users = json.load(f)
@@ -59,100 +60,153 @@ def get_user_nickname(username):
         return users.get(username, {}).get('name', username)
     except: return username
 
-# --- 3. 自選股系統 ---
-def get_watchlist(username):
-    try:
-        with open(WATCHLIST_FILE, 'r', encoding='utf-8') as f: return json.load(f).get(username, [])
-    except: return []
-
-def update_watchlist(username, code, action="add"):
-    try:
-        with open(WATCHLIST_FILE, 'r', encoding='utf-8') as f: data = json.load(f)
-        user_list = data.get(username, [])
-        if action == "add" and code not in user_list: user_list.append(code)
-        elif action == "remove" and code in user_list: user_list.remove(code)
-        data[username] = user_list
-        with open(WATCHLIST_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False)
-        return True
-    except: return False
-
-# --- 4. 股票數據 (V93 核心修正：暴力試錯法) ---
+# --- 3. 股票數據核心 (V101 重點升級) ---
 def get_stock_data(code):
     """
-    不管 twstock 說什麼，直接用 yfinance 試 .TW 和 .TWO
+    自動判斷台股/美股並抓取資料
     """
     try:
-        # 建立假的 Stock 物件結構，避免 UI 報錯
+        code = str(code).upper().strip()
+        is_tw = code.isdigit() # 純數字視為台股
+        
+        # 建立假的 Stock Info 物件，確保 UI 不會報錯
         class FakeStockInfo:
             def __init__(self, code, name):
                 self.info = {
                     'name': name,
                     'code': code,
-                    'sharesOutstanding': 0,
-                    'heldPercentInstitutions': 0,
-                    'longBusinessSummary': '資料由 Yahoo Finance 提供 (TWSE IP Bypass Mode)'
+                    'longBusinessSummary': f"{name} ({code}) - 資料來源: Yahoo Finance"
                 }
 
-        # 嘗試取得名稱 (若 twstock 還活著)
-        name = code
-        try:
-            if code in twstock.codes:
-                name = twstock.codes[code].name
-        except: pass
-
-        fake_stock_obj = FakeStockInfo(code, name)
-
-        # 策略 A: 先試上市 (.TW)
-        try:
+        # --- A. 台股處理邏輯 ---
+        if is_tw:
+            name = code
+            if code in twstock.codes: name = twstock.codes[code].name
+            
+            fake_stock = FakeStockInfo(code, name)
+            
+            # 優先嘗試 .TW
             df = yf.download(f"{code}.TW", period="1y", interval="1d", progress=False)
-            if not df.empty and len(df) > 5:
-                # 清洗 MultiIndex
-                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-                return f"{code}", fake_stock_obj, df, "yahoo"
-        except: pass
+            if df.empty:
+                df = yf.download(f"{code}.TWO", period="1y", interval="1d", progress=False)
+                
+        # --- B. 美股處理邏輯 ---
+        else:
+            # 美股代號通常是英文 (AAPL, NVDA)
+            fake_stock = FakeStockInfo(code, code) 
+            
+            # 嘗試抓取詳細名稱
+            try:
+                t = yf.Ticker(code)
+                info = t.info
+                if 'longName' in info:
+                    fake_stock.info['name'] = info['longName']
+                    fake_stock.info['longBusinessSummary'] = info.get('longBusinessSummary', '美股企業資料')
+            except: pass
+            
+            df = yf.download(code, period="1y", interval="1d", progress=False)
 
-        # 策略 B: 若失敗，試上櫃 (.TWO)
-        try:
-            df = yf.download(f"{code}.TWO", period="1y", interval="1d", progress=False)
-            if not df.empty and len(df) > 5:
-                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-                return f"{code}", fake_stock_obj, df, "yahoo"
-        except: pass
+        # --- 共通資料清洗 ---
+        if df.empty: return code, None, None, "fail"
+        
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+            
+        if len(df) < 5: return code, None, None, "fail"
 
-        # 都失敗
-        return code, None, None, "fail"
+        return code, fake_stock, df, "yahoo"
         
     except Exception as e:
-        print(f"Global Error fetching {code}: {e}")
+        print(f"Error: {e}")
         return code, None, None, "fail"
 
+def get_realtime_data(df, code):
+    """
+    V101: 雙軌即時資料 (台股抓 twstock, 美股抓 yfinance)
+    """
+    if df is None or df.empty: return df, None, None
+    
+    try:
+        code = str(code).upper().strip()
+        is_tw = code.isdigit()
+        
+        latest_price = 0
+        high = 0
+        low = 0
+        vol = 0
+        
+        # A. 台股即時 (用 twstock)
+        if is_tw:
+            real = twstock.realtime.get(code)
+            if real['success']:
+                rt = real['realtime']
+                if rt['latest_trade_price'] != '-' and rt['latest_trade_price'] is not None:
+                    latest_price = float(rt['latest_trade_price'])
+                    high = float(rt['high'])
+                    low = float(rt['low'])
+                    vol = float(rt['accumulate_trade_volume']) * 1000 # 轉股數
+                else:
+                    return df, None, _make_fake_rt(df)
+            else:
+                return df, None, _make_fake_rt(df)
+
+        # B. 美股即時 (用 yfinance fast_info)
+        else:
+            t = yf.Ticker(code)
+            fast = t.fast_info
+            if fast.last_price:
+                latest_price = fast.last_price
+                high = fast.day_high if fast.day_high else latest_price
+                low = fast.day_low if fast.day_low else latest_price
+                vol = fast.last_volume if fast.last_volume else 0
+            else:
+                 return df, None, _make_fake_rt(df)
+
+        rt_pack = {
+            'latest_trade_price': latest_price,
+            'high': high,
+            'low': low,
+            'accumulate_trade_volume': vol, 
+            'previous_close': df.iloc[-2]['Close'] if len(df)>1 else latest_price
+        }
+        
+        return df, None, rt_pack
+
+    except Exception as e:
+        return df, None, _make_fake_rt(df)
+
+def _make_fake_rt(df):
+    latest = df.iloc[-1]
+    return {
+        'latest_trade_price': latest['Close'],
+        'high': latest['High'],
+        'low': latest['Low'],
+        'accumulate_trade_volume': latest['Volume'],
+        'previous_close': df.iloc[-2]['Close'] if len(df)>1 else latest['Open']
+    }
+
 def get_color_settings(code):
-    return {'up': 'red', 'down': 'green', 'delta': 'inverse'}
+    # 台股：紅漲綠跌
+    # 美股：綠漲紅跌 (國際慣例)
+    if str(code).isdigit():
+        return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'} # 台股模式
+    else:
+        return {'up': '#00E050', 'down': '#FF2B2B', 'delta': 'normal'} # 美股模式
 
-# --- 5. 掃描與歷史紀錄 ---
-def add_history(user, text): pass 
-
+# --- 其他功能維持不變 ---
+def translate_text(text): return text
 def save_scan_results(stype, codes):
-    filename = f"scan_{stype}.json"
-    with open(filename, 'w') as f: json.dump(codes, f)
-
+    with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
 def load_scan_results(stype):
-    filename = f"scan_{stype}.json"
-    if os.path.exists(filename):
-        with open(filename, 'r') as f: return json.load(f)
+    if os.path.exists(f"scan_{stype}.json"):
+        with open(f"scan_{stype}.json", 'r') as f: return json.load(f)
     return []
-
-# --- 6. 留言板 ---
 def save_comment(user, msg):
-    if not os.path.exists(COMMENTS_FILE):
-        df = pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
+    if not os.path.exists(COMMENTS_FILE): df = pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
     else: df = pd.read_csv(COMMENTS_FILE)
     new_row = {'User': user, 'Nickname': user, 'Message': msg, 'Time': datetime.now().strftime("%Y-%m-%d %H:%M")}
     df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
     df.to_csv(COMMENTS_FILE, index=False)
-
 def get_comments():
     if os.path.exists(COMMENTS_FILE): return pd.read_csv(COMMENTS_FILE)
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
-
-def translate_text(text): return text
