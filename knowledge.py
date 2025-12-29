@@ -1,4 +1,4 @@
-# knowledge.py - 股市新手村 (V100 終極百科全書版)
+# knowledge.py - 股市新手村 (V103 終極完整版)
 
 STOCK_TERMS = {
     "🔰 幼兒園：交易規則": {
