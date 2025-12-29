@@ -4,11 +4,11 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 
-# --- CSS: V77 視覺優化 ---
+# --- CSS: V78 無閃爍優化版 ---
 def inject_custom_css():
     st.markdown("""
         <style>
-        /* K線卡片與戰略報告 */
+        /* K線戰法與區塊 */
         .kline-card-header { margin-top: 0.5rem !important; margin-bottom: 0.2rem !important; font-size: 1.1rem !important; font-weight: bold; }
         .action-list ul { padding-left: 1.2rem !important; margin-bottom: 0rem !important; }
         .action-list li { margin-bottom: 0.3rem !important; line-height: 1.6 !important; font-size: 1rem !important; }
@@ -18,54 +18,45 @@ def inject_custom_css():
         .bear-box { background-color: #1a2e1a; border-left: 6px solid #00E050; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
         .neutral-box { background-color: #262730; border-left: 6px solid #888; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
 
-        /* 基礎元件 */
-        div[data-testid="stVerticalBlock"] > div { padding-top: 0.1rem; padding-bottom: 0.1rem; gap: 0.3rem; }
+        /* 基礎元件微調 */
+        div[data-testid="stVerticalBlock"] > div { gap: 0.4rem; } 
         button { height: auto !important; padding-top: 0.2rem !important; padding-bottom: 0.2rem !important; }
-        div[data-testid="stMetricValue"] { font-size: 1.35rem !important; font-weight: 800 !important; }
-        div[data-testid="stMetricLabel"] { font-size: 0.9rem !important; color: #d0d0d0 !important; }
-        hr.compact { margin: 8px 0px !important; border: 0; border-top: 1px solid #444; }
+        div[data-testid="stMetricValue"] { font-size: 1.4rem !important; font-weight: 800 !important; }
+        div[data-testid="stMetricLabel"] { font-size: 0.9rem !important; color: #aaa !important; }
+        hr.compact { margin: 10px 0px !important; border: 0; border-top: 1px solid #444; }
         
-        /* V77: 即時數據閃爍標籤 */
-        .live-badge { 
-            background-color: #00FF00; color: #000; padding: 2px 6px; 
-            border-radius: 4px; font-weight: bold; font-size: 0.8rem; 
-            vertical-align: middle; margin-left: 8px;
+        /* 即時狀態標籤 */
+        .live-tag { 
+            color: #00FF00; font-weight: bold; font-size: 0.95rem; 
+            border: 1px solid #00FF00; padding: 2px 8px; border-radius: 4px;
+            box-shadow: 0 0 5px rgba(0,255,0,0.3);
         }
-        .update-time { font-size: 0.8rem; color: #888; margin-top: 4px; }
         
         @media only screen and (max-width: 768px) {
-            div[data-testid="stVerticalBlock"] > div { gap: 0.8rem !important; padding-top: 0.5rem !important; }
-            button { padding: 0.5rem 1rem !important; font-size: 1rem !important; width: 100% !important; margin-top: 5px !important; }
-            .js-plotly-plot { height: 300px !important; }
+            div[data-testid="stVerticalBlock"] > div { gap: 0.8rem !important; }
+            button { width: 100% !important; margin-top: 5px !important; }
+            .js-plotly-plot { height: 320px !important; }
         }
         </style>
     """, unsafe_allow_html=True)
 
-# --- 1. 標題 ---
+# --- 1. 標題 (V78: 簡化，控制權交給 stock_app) ---
 def render_header(title, show_monitor=False):
     inject_custom_css()
     c1, c2 = st.columns([3, 1])
     c1.title(title)
     
-    is_live = False
+    # 這裡只負責顯示標題，開關邏輯移至 stock_app 的 sidebar 或主控台
+    # 以避免重新渲染時狀態遺失
     if show_monitor:
-        if 'monitor_active' not in st.session_state: st.session_state['monitor_active'] = False
-        is_live = c2.toggle("🔴 啟動 1秒極速刷新", value=st.session_state['monitor_active'], key="live_toggle_btn")
-        st.session_state['monitor_active'] = is_live
-        
-        if is_live:
-            st.caption("⚡ 系統正在以每秒頻率連線交易所...")
-        else:
-            st.caption("資料來源: Yahoo Finance / TWSE | V77 邏輯修復版")
+        st.caption(f"V78 高速即時引擎 | 資料來源: TWSE")
             
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-    return is_live
 
 # --- 2. 返回 ---
 def render_back_button(callback_func):
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-    _, c2, _ = st.columns([2, 1, 2])
-    if c2.button("⬅️ 返回列表", use_container_width=True):
+    if st.button("⬅️ 返回列表", use_container_width=True):
         callback_func()
 
 # --- 3. 新手村卡片 ---
@@ -106,53 +97,51 @@ def render_company_profile(summary):
         with st.expander("🏢 公司簡介與業務", expanded=False):
             st.write(summary)
 
-# --- 5. 儀表板 (V77: 強化即時感) ---
+# --- 5. 儀表板 (V78: 極致即時顯示) ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              turnover_rate, bid_ask_data, color_settings, 
                              realtime_data=None):
     
-    is_realtime = False
-    update_time_str = ""
+    # 台灣時間
+    tw_tz = timezone(timedelta(hours=8))
+    now_tw = datetime.now(tw_tz).strftime('%H:%M:%S')
     
-    # 優先使用即時資料覆蓋
+    # 使用即時資料覆蓋
     if realtime_data:
-        is_realtime = True
         curr = realtime_data['latest_trade_price']
         high = realtime_data['high']
         low = realtime_data['low']
         vol = int(float(realtime_data['accumulate_trade_volume']))
         
-        # 台灣時間
-        tw_tz = timezone(timedelta(hours=8))
-        now = datetime.now(tw_tz)
-        update_time_str = now.strftime('%H:%M:%S')
-        
-        # 重新計算漲跌
         prev_close = realtime_data['previous_close']
         if prev_close > 0:
             chg = curr - prev_close
             pct = (chg / prev_close) * 100
             amp = ((high - low) / prev_close) * 100
         
-        # 強制紅綠變色
+        # 顏色邏輯
         if chg > 0: val_color = "#FF2B2B"
         elif chg < 0: val_color = "#00E050"
         else: val_color = "#FFFFFF"
     else:
         val_color = "white"
 
+    # 使用 container 確保佈局穩定
     with st.container():
+        # 顯示即時狀態列
+        if realtime_data:
+            st.markdown(f"<div style='margin-bottom:10px;'><span class='live-tag'>● LIVE 連線中: {now_tw}</span></div>", unsafe_allow_html=True)
+            
         m1, m2, m3, m4, m5 = st.columns(5)
         
-        # V77: 自定義 HTML 顯示價格與時間，確保使用者知道有在更新
-        live_indicator = f"<span class='live-badge'>LIVE {update_time_str}</span>" if is_realtime else ""
-        
         m1.markdown(f"""
-            <div style='font-size:0.9rem; color:#d0d0d0'>成交價 (Price) {live_indicator}</div>
-            <div style='font-size:1.6rem; font-weight:800; color:{val_color}; line-height:1.2'>
+            <div style='font-size:0.9rem; color:#aaa'>成交價 (Price)</div>
+            <div style='font-size:1.8rem; font-weight:800; color:{val_color}; line-height:1.2; letter-spacing:1px;'>
                 {curr:.2f} 
-                <span style='font-size:1rem'>({chg:+.2f} / {pct:+.2f}%)</span>
+            </div>
+            <div style='font-size:1rem; font-weight:bold; color:{val_color}'>
+                {chg:+.2f} ({pct:+.2f}%)
             </div>
             """, unsafe_allow_html=True)
         
@@ -175,15 +164,17 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         v5.metric("外資持股", f"{foreign_held:.1f}%")
     
     if bid_ask_data:
-        with st.expander("📊 即時五檔報價 (Best Bid/Ask)", expanded=True):
-            b_price = bid_ask_data.get('bid_price', ['-'])[0]
-            b_vol = bid_ask_data.get('bid_volume', ['-'])[0]
-            a_price = bid_ask_data.get('ask_price', ['-'])[0]
-            a_vol = bid_ask_data.get('ask_volume', ['-'])[0]
-            
-            c1, c2 = st.columns(2)
-            c1.metric("最佳買入 (Bid)", f"{b_price}", f"量: {b_vol}", delta_color="off")
-            c2.metric("最佳賣出 (Ask)", f"{a_price}", f"量: {a_vol}", delta_color="off")
+        # V78: 移除 Expander，直接顯示以求速度
+        st.markdown("---")
+        st.caption("📊 即時五檔 (Best Bid/Ask)")
+        b_price = bid_ask_data.get('bid_price', ['-'])[0]
+        b_vol = bid_ask_data.get('bid_volume', ['-'])[0]
+        a_price = bid_ask_data.get('ask_price', ['-'])[0]
+        a_vol = bid_ask_data.get('ask_volume', ['-'])[0]
+        
+        c1, c2 = st.columns(2)
+        c1.metric("最佳買入 (Bid)", f"{b_price}", f"量: {b_vol}", delta_color="off")
+        c2.metric("最佳賣出 (Ask)", f"{a_price}", f"量: {a_vol}", delta_color="off")
 
 # --- 6. 戰術建議 ---
 def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="general"):
@@ -198,35 +189,35 @@ def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="ge
         stop_price = low * 0.99; target_price = high * 1.02; hold_time = "當日沖銷"
         if price > m5 and price > pivot:
             action = "🔥 強力作多"; color_hex = "#FF2B2B"
-            entry_price_txt = f"{pivot:.1f} 附近 (平盤上)"; exit_price_txt = f"跌破 {m5:.1f} (均價線)"
+            entry_price_txt = f"{pivot:.1f} 附近"; exit_price_txt = f"跌破 {m5:.1f}"
             reasoning = "量價齊揚站上樞紐，多方動能強勁，適合順勢操作。"
         elif price < pivot:
             action = "🧊 偏空操作"; color_hex = "#00E050"
-            entry_price_txt = f"反彈 {pivot:.1f} 不過"; exit_price_txt = "急殺出量或尾盤"
+            entry_price_txt = f"反彈 {pivot:.1f} 不過"; exit_price_txt = "急殺出量"
             reasoning = "股價受制於樞紐之下，上方賣壓重，建議偏空思考。"
         else:
             action = "⚖️ 區間震盪"; color_hex = "#FF9F1C"
-            entry_price_txt = f"{s1:.1f} 支撐處"; exit_price_txt = f"{r1:.1f} 壓力處"
+            entry_price_txt = f"{s1:.1f} 支撐"; exit_price_txt = f"{r1:.1f} 壓力"
             reasoning = "多空膠著，建議區間來回操作或觀望。"
     elif strategy_type == 'short':
         stop_price = m20; target_price = price * 1.08; hold_time = "3-5 天"
         if price > m5 and m5 > m20:
             action = "🚀 穩健買進"; color_hex = "#FF2B2B"
-            entry_price_txt = f"回測 {m5:.1f} (5日線)"; exit_price_txt = f"跌破 {m20:.1f} (月線)"
+            entry_price_txt = f"回測 {m5:.1f}"; exit_price_txt = f"跌破 {m20:.1f}"
             reasoning = "均線多頭排列，短線趨勢向上，拉回找買點勝率高。"
         elif price < m5:
             action = "📉 等待止穩"; color_hex = "#FF9F1C"
-            entry_price_txt = f"接近 {m20:.1f} 收紅K"; exit_price_txt = "有效跌破月線"
+            entry_price_txt = f"接近 {m20:.1f}"; exit_price_txt = "有效跌破月線"
             reasoning = "短線漲多乖離修正，等待回測月線支撐確認後再進場。"
     elif strategy_type == 'long':
         stop_price = m60; target_price = price * 1.20; hold_time = "1-3 個月"
         if price > m60:
             action = "🐢 長線續抱"; color_hex = "#FF2B2B"
-            entry_price_txt = f"{m60:.1f} (季線) 附近"; exit_price_txt = "季線下彎且股價跌破"
-            reasoning = "股價站穩生命線(季線)，長線保護短線，適合波段持有。"
+            entry_price_txt = f"{m60:.1f} 附近"; exit_price_txt = "季線下彎"
+            reasoning = "股價站穩生命線，長線保護短線，適合波段持有。"
         else:
             action = "⏳ 觀望"; color_hex = "#aaaaaa"
-            entry_price_txt = "突破季線帶量"; exit_price_txt = "續破底"
+            entry_price_txt = "突破季線"; exit_price_txt = "續破底"
             reasoning = "目前仍處於空頭或整理架構，建議等待趨勢翻多。"
     else: 
         stop_price = m20; target_price = price * 1.05; hold_time = "視情況"
@@ -236,7 +227,7 @@ def generate_trade_advice(price, high, low, m5, m20, m60, rsi, strategy_type="ge
             reasoning = "人氣匯聚強勢股，沿著趨勢操作，轉弱即跑。"
         else: 
             action = "⚠️ 轉弱減碼"; color_hex = "#00E050"
-            entry_price_txt = "暫不建議"; exit_price_txt = f"反彈 {m20:.1f} 減碼"
+            entry_price_txt = "暫不建議"; exit_price_txt = f"反彈 {m20:.1f}"
             reasoning = "籌碼鬆動轉弱，建議反彈減碼降低風險。"
     return action, color_hex, target_price, stop_price, entry_price_txt, exit_price_txt, hold_time, reasoning
 
@@ -246,7 +237,6 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
     action_title = "計算中"; action_color_hex = "#aaaaaa"
     target_val = 0.0; stop_val = 0.0
     entry_txt = "-"; exit_txt = "-"; hold_txt = "-"; reason_txt = "資料不足"
-    
     strat_type = "general"
     if strategy_info:
         if "當沖" in strategy_info or "量" in strategy_info: strat_type = "day"
@@ -286,10 +276,10 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
             if st.button("分析", key=f"{key_prefix}_{code}", use_container_width=True): return True
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         d1, d2, d3, d4 = st.columns(4)
-        with d1: st.markdown(f"🎯 **目標價** : `{target_val:.2f}`")
-        with d2: st.markdown(f"🛡️ **停損價** : `{stop_val:.2f}`")
-        with d3: st.caption(f"📥 **建議入場**\n{entry_txt}")
-        with d4: st.caption(f"📤 **建議離場**\n{exit_txt}")
+        with d1: st.markdown(f"🎯 **目標** `{target_val:.2f}`")
+        with d2: st.markdown(f"🛡️ **停損** `{stop_val:.2f}`")
+        with d3: st.caption(f"📥 **入場**\n{entry_txt}")
+        with d4: st.caption(f"📤 **離場**\n{exit_txt}")
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         e1, e2 = st.columns([3, 1])
         with e1: st.info(f"💡 **AI觀點**: {reason_txt}")
@@ -303,22 +293,21 @@ def render_chart(df, title, color_settings):
     df['MA60'] = df['Close'].rolling(60).mean()
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.03)
     fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K線', increasing_line_color=color_settings['up'], decreasing_line_color=color_settings['down']), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], line=dict(color='#FF00FF', width=1), name='MA5 (週)'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1), name='MA20 (月)'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MA60'], line=dict(color='#0000FF', width=1), name='MA60 (季)'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], line=dict(color='#FF00FF', width=1), name='MA5'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1), name='MA20'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MA60'], line=dict(color='#0000FF', width=1), name='MA60'), row=1, col=1)
     vol_colors = [color_settings['up'] if c >= o else color_settings['down'] for c, o in zip(df['Close'], df['Open'])]
-    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=vol_colors, name='成交量'), row=2, col=1)
+    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=vol_colors, name='量'), row=2, col=1)
     fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=10, b=10), showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 9. AI 報告 (V72: 呼叫 5日K線引擎) ---
+# --- 9. AI 報告 ---
 def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df=None):
     st.subheader("🤖 AI 戰略分析報告")
     pivot = (high + low + curr) / 3
     r1 = 2 * pivot - low; s1 = 2 * pivot - high
     
     t1, t2, t3 = st.tabs(["📊 詳細趨勢診斷", "🎯 關鍵價位試算", "🕯️ K線型態戰法"])
-    
     with t1:
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -328,35 +317,31 @@ def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df=None):
             elif curr > m20: st.warning("🌤️ **震盪偏多**：站上月線，但需留意前高。")
             else: st.info("🌧️ **震盪偏空**：月線之下，等待底部。")
         with c2:
-            st.markdown("#### ⚡ 動能指標 (RSI)")
+            st.markdown("#### ⚡ 動能指標")
             st.metric("RSI (14)", f"{rsi:.1f}")
-            if rsi > 80: st.write("⚠️ **過熱警戒**：短線有回檔風險。")
-            elif rsi < 20: st.write("💎 **超賣區**：隨時可能出現反彈。")
-            else: st.write("✅ **動能中性**：無明顯過熱或超賣。")
+            if rsi > 80: st.write("⚠️ **過熱警戒**")
+            elif rsi < 20: st.write("💎 **超賣區**")
+            else: st.write("✅ **動能中性**")
         with c3:
-            st.markdown("#### 📏 乖離率分析")
+            st.markdown("#### 📏 乖離率")
             st.metric("季線乖離", f"{bias:.2f}%")
-            if bias > 20: st.write("⚠️ **正乖離過大**：容易拉回。")
-            elif bias < -20: st.write("💎 **負乖離過大**：有機會反彈。")
-            else: st.write("✅ **乖離正常**：股價沿著趨勢線運行。")
+            if bias > 20: st.write("⚠️ **正乖離大**")
+            elif bias < -20: st.write("💎 **負乖離大**")
+            else: st.write("✅ **乖離正常**")
     with t2:
-        st.markdown("#### 🎯 關鍵價位 (Pivot Points)")
+        st.markdown("#### 🎯 關鍵價位 (Pivot)")
         st.info("計算基礎：(最高+最低+收盤)/3")
         cp1, cp2, cp3 = st.columns(3)
-        cp1.metric("壓力位 (R1)", f"{r1:.2f}", help="預估上方第一道壓力")
-        cp2.metric("中軸 (Pivot)", f"{pivot:.2f}", help="多空分水嶺，站上偏多")
-        cp3.metric("支撐位 (S1)", f"{s1:.2f}", help="預估下方第一道支撐")
-        
+        cp1.metric("壓力 (R1)", f"{r1:.2f}")
+        cp2.metric("中軸 (P)", f"{pivot:.2f}")
+        cp3.metric("支撐 (S1)", f"{s1:.2f}")
     with t3:
         if df is not None and len(df) >= 5:
-            # 確保 analyze_multi_candle_patterns 函式存在
             try:
-                # 這裡直接實作簡單版分析邏輯，以避免循環匯入或未定義錯誤
-                # 完整邏輯請參照 V72
+                # 簡單分析邏輯以避免依賴問題
                 c1 = df.iloc[-1]; c2 = df.iloc[-2]; c3 = df.iloc[-3]
                 is_red = lambda c: c['Close'] > c['Open']
-                
-                title = "盤整待變"; advice = "近期 K 線無明顯反轉訊號，建議觀望。"; box = "neutral-box"
+                title = "盤整待變"; advice = "近期 K 線無明顯反轉訊號。"; box = "neutral-box"
                 
                 if is_red(c3) and is_red(c2) and is_red(c1) and c1['Close']>c2['Close']>c3['Close']:
                     title = "💂‍♂️ 紅三兵 (Three White Soldiers)"
@@ -364,7 +349,5 @@ def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df=None):
                     advice = "連續三根紅K穩步上攻，多頭部隊集結完畢，趨勢由空翻多。"
                 
                 st.markdown(f"""<div class='{box}'><span class='strategy-title'>{title}</span><div class='strategy-text'>{advice}</div></div>""", unsafe_allow_html=True)
-            except:
-                st.warning("數據分析中...")
-        else:
-            st.warning("數據不足，無法進行 K 線型態分析")
+            except: st.warning("分析中...")
+        else: st.warning("資料不足")
