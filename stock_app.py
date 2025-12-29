@@ -14,6 +14,7 @@ from datetime import datetime, time as dt_time, timedelta, timezone
 import stock_db as db
 import stock_ui as ui
 
+# 載入知識庫
 try:
     import knowledge
     importlib.reload(knowledge)
@@ -21,9 +22,21 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V78", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V79", layout="wide")
 
-# --- 即時數據注入 (維持不變) ---
+# --- V79: 自動登入檢查 ---
+def check_session():
+    # 檢查 URL 參數是否有 user (F5 刷新後會保留)
+    # Streamlit 1.30+ 使用 st.query_params
+    qp = st.query_params
+    if "user" in qp and not st.session_state.get('user_id'):
+        uid = qp["user"]
+        # 這裡可以加強安全性，例如檢查 token，目前簡易實作
+        st.session_state['user_id'] = uid
+        return True
+    return False
+
+# --- 即時數據注入 (維持 V76) ---
 def inject_realtime_data(df, code):
     if df is None or df.empty: return df, None, None
     try:
@@ -65,7 +78,7 @@ def check_market_hours():
     if start_time <= current_time <= end_time: return True, "市場開盤中"
     else: return False, f"非交易時間 ({now.strftime('%H:%M')})"
 
-# --- State ---
+# --- State 初始化 ---
 defaults = {
     'view_mode': 'welcome', 'user_id': None, 'page_stack': ['welcome'],
     'current_stock': "", 'current_name': "", 'scan_pool': [], 'filtered_pool': [],      
@@ -74,6 +87,9 @@ defaults = {
 }
 for k, v in defaults.items():
     if k not in st.session_state: st.session_state[k] = v
+
+# 執行自動登入檢查
+check_session()
 
 if not st.session_state['scan_pool']:
     try:
@@ -97,10 +113,10 @@ def solve_stock_id(val):
     return None, None
 
 def is_ocr_ready(): return shutil.which('tesseract') is not None
-def check_language_pack(): return True # 簡化檢查
+def check_language_pack(): return True 
 
 def process_image_upload(image_file):
-    return [], {"raw_text": "OCR Disabled in V78"}
+    return [], {"raw_text": "OCR Disabled in V79"}
 
 def nav_to(mode, code=None, name=None):
     if code:
@@ -131,7 +147,6 @@ with st.sidebar:
     st.divider()
     st.text_input("🔍 搜尋", key="search_input_val", on_change=handle_search)
     
-    # 掃描區塊 (保持 V74 邏輯)
     with st.container(border=True):
         st.markdown("### 🤖 AI 策略")
         sel_group = st.selectbox("1️⃣ 範圍", st.session_state.get('all_groups', ["全部"]), index=0)
@@ -166,16 +181,101 @@ with st.sidebar:
     if not uid:
         if st.button("🔐 登入/註冊"): nav_to('login'); st.rerun()
     else:
-        if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; nav_to('welcome'); st.rerun()
+        # V79: 登出時清除 query params
+        if st.button("🚪 登出"): 
+            st.session_state['user_id']=None
+            st.session_state['watch_active']=False
+            st.query_params.clear() # 清除網址參數
+            nav_to('welcome'); st.rerun()
+            
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 78.0 (無閃爍容器版)")
+    st.markdown("---"); st.caption("Ver: 79.0 (F5不登出版)")
 
 # --- Main Logic ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V78")
-    st.markdown("### 🚀 V78 更新：無閃爍高速引擎\n* **✨ 容器化渲染**：使用 Streamlit `empty()` 容器技術，局部更新數據，畫面不再閃爍。\n* **⚡ 極速連動**：盤中數據每秒自動同步，體驗大幅提升。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V79")
+    st.markdown("### 🚀 V79 更新：F5 不登出 & 資料不消失\n* **🔄 自動登入**：刷新網頁後，系統會自動記住您的身分，不再被登出。\n* **💾 資料保存**：自選股與會員資料現在會寫入硬碟，伺服器重啟也不會遺失。")
+
+elif mode == 'login':
+    ui.render_header("🔐 會員中心")
+    t1, t2 = st.tabs(["登入", "註冊"])
+    with t1:
+        u = st.text_input("帳號", key="l_u"); p = st.text_input("密碼", type="password", key="l_p")
+        if st.button("登入"):
+            ok, res = db.login_user(u, p)
+            if ok: 
+                st.session_state['user_id']=u
+                # V79: 設定 URL 參數以維持登入
+                st.query_params["user"] = u
+                st.success("登入成功"); time.sleep(0.5); nav_to('watch'); st.rerun()
+            else: st.error(res)
+    with t2:
+        nu = st.text_input("新帳號", key="r_u"); np = st.text_input("新密碼", type="password", key="r_p")
+        nn = st.text_input("您的暱稱", key="r_n")
+        if st.button("註冊"):
+            ok, res = db.register_user(nu, np, nn)
+            if ok: 
+                st.session_state['user_id']=nu
+                st.query_params["user"] = nu
+                st.success(f"歡迎 {nn}"); time.sleep(0.5); nav_to('watch'); st.rerun()
+            else: st.error(res)
+    ui.render_back_button(go_back)
+
+# ... (watch, learn, chat, scan, analysis 區塊邏輯與 V78 完全相同，請直接使用 V78 的程式碼)
+elif mode == 'watch':
+    ui.render_header("🔒 個人自選股")
+    uid = st.session_state['user_id']
+    if not uid: st.warning("請先登入"); ui.render_back_button(go_back)
+    else:
+        wl = db.get_watchlist(uid)
+        c1, c2 = st.columns([3,1])
+        add_c = c1.text_input("✍️ 新增自選股", placeholder="代號/名稱")
+        if c2.button("加入", use_container_width=True) and add_c: 
+            code, name = solve_stock_id(add_c)
+            if code: db.update_watchlist(uid, code, "add"); st.toast(f"已加入: {name}", icon="✅"); time.sleep(0.5); st.rerun()
+            else: st.error(f"找不到: {add_c}")
+
+        if wl:
+            stock_data = []
+            for code in wl:
+                name = code
+                if code in twstock.codes: name = twstock.codes[code].name
+                stock_data.append({"代號": code, "名稱": name})
+            
+            c_view, c_manage = st.columns([2, 1])
+            with c_view:
+                st.subheader(f"📊 持股列表 ({len(wl)})")
+                st.dataframe(pd.DataFrame(stock_data), use_container_width=True, height=300, hide_index=True)
+            
+            with c_manage:
+                st.subheader("⚙️ 管理清單")
+                options = [f"{row['代號']} {row['名稱']}" for row in stock_data]
+                remove_list = st.multiselect("選擇移除項目", options, label_visibility="collapsed")
+                if st.button("🗑️ 確認移除", type="primary", use_container_width=True):
+                    if remove_list:
+                        for item in remove_list:
+                            code_to_remove = item.split(" ")[0]
+                            db.update_watchlist(uid, code_to_remove, "remove")
+                        st.success("已移除"); st.rerun()
+
+            st.markdown("<hr class='compact'>", unsafe_allow_html=True)
+            if st.button("🚀 啟動 AI 詳細診斷 (V79)", use_container_width=True): 
+                st.session_state['watch_active'] = True; st.rerun()
+            
+            if st.session_state['watch_active']:
+                st.success("診斷完成！")
+                for i, code in enumerate(wl):
+                    full_id, _, d, src = db.get_stock_data(code)
+                    n = twstock.codes[code].name if code in twstock.codes else code
+                    if d is not None:
+                        # 注入即時資料
+                        d_real, _, _ = inject_realtime_data(d, code)
+                        curr = d_real['Close'].iloc[-1] if isinstance(d_real, pd.DataFrame) else d_real['Close']
+                        if ui.render_detailed_card(code, n, curr, d_real, src, key_prefix="watch", strategy_info="自選觀察"): nav_to('analysis', code, n); st.rerun()
+        else: st.info("目前無自選股")
+        ui.render_back_button(go_back)
 
 elif mode == 'analysis':
     code = st.session_state['current_stock']; name = st.session_state['current_name']
@@ -231,34 +331,113 @@ elif mode == 'analysis':
     if is_live_mode:
         while True:
             time.sleep(1) # 等待 1 秒
-            # 重新呼叫渲染函式，這會清空 main_placeholder 並重新填入最新數據
             still_live = render_content()
-            
-            # 如果使用者在迴圈中關閉了 Live 開關 (雖然 UI 沒刷新可能按不到，但為了保險)
             if not still_live:
                 break
 
-# 其他頁面維持不變，僅需保留基本結構
-elif mode == 'login':
-    # (省略... 請使用 V77 的 login 代碼)
-    ui.render_header("🔐 會員中心")
-    st.info("請登入以使用更多功能")
-    ui.render_back_button(go_back)
-elif mode == 'watch':
-    # (省略... 請使用 V77 的 watch 代碼)
-    ui.render_header("🔒 個人自選股")
-    st.info("請登入查看自選股")
-    ui.render_back_button(go_back)
 elif mode == 'learn':
-    # (省略... 請使用 V77 的 learn 代碼)
-    ui.render_header("📖 股市新手村")
-    st.markdown("知識庫載入中...")
+    ui.render_header("📖 股市新手村"); t1, t2, t3 = st.tabs(["策略說明", "名詞解釋", "🕯️ K線型態"])
+    with t1: st.markdown(STRATEGY_DESC)
+    with t2:
+        q = st.text_input("搜尋名詞")
+        for cat, items in STOCK_TERMS.items():
+            with st.expander(cat, expanded=True):
+                for k, v in items.items():
+                    if not q or q in k: ui.render_term_card(k, v)
+    with t3:
+        st.info("這裡展示常見的 K 線反轉訊號，紅 K 代表漲 (台股規則)。")
+        st.subheader("🔥 多方訊號 (看漲)")
+        for name, data in KLINE_PATTERNS.get("bull", {}).items(): ui.render_kline_pattern_card(name, data)
+        st.divider()
+        st.subheader("❄️ 空方訊號 (看跌)")
+        for name, data in KLINE_PATTERNS.get("bear", {}).items(): ui.render_kline_pattern_card(name, data)
     ui.render_back_button(go_back)
+
 elif mode == 'chat':
     ui.render_header("💬 戰友留言板")
+    if not st.session_state['user_id']: st.warning("請先登入")
+    else:
+        with st.form("msg"):
+            m = st.text_input("留言內容")
+            if st.form_submit_button("送出") and m: db.save_comment(st.session_state['user_id'], m); st.rerun()
+    st.markdown("<hr class='compact'>", unsafe_allow_html=True); df = db.get_comments()
+    for i, r in df.iloc[::-1].head(20).iterrows(): st.info(f"**{r['Nickname']}** ({r['Time']}):\n{r['Message']}")
     ui.render_back_button(go_back)
-elif mode == 'scan':
-    # (省略... 請使用 V77 的 scan 代碼)
-    ui.render_header("🤖 AI 掃描")
-    st.info("掃描功能區")
+
+elif mode == 'scan': 
+    stype = st.session_state['current_stock']; target_group = st.session_state.get('scan_target_group', '全部')
+    title_map = {'day': '⚡ 強力當沖', 'short': '📈 穩健短線', 'long': '🐢 長線安穩', 'top': '🏆 熱門強勢'}
+    ui.render_header(f"🤖 {target_group} ⨉ {title_map.get(stype, stype)}")
+    saved_codes = db.load_scan_results(stype) 
+    c1, c2 = st.columns([1, 4]); do_scan = c1.button("🔄 開始智能篩選", type="primary")
+    if saved_codes and not do_scan: c2.info(f"上次記錄: 共 {len(saved_codes)} 檔")
+    else: c2.info(f"目標範圍: {target_group}")
+
+    if do_scan:
+        st.session_state['scan_results'] = []; raw_results = []
+        full_pool = st.session_state['scan_pool']
+        if target_group != "🔍 全部上市櫃": target_pool = [c for c in full_pool if c in twstock.codes and twstock.codes[c].group == target_group]
+        else: target_pool = full_pool
+        if not target_pool: st.error("無資料"); st.stop()
+        bar = st.progress(0); limit = 500 
+        for i, c in enumerate(target_pool):
+            if i >= limit: break
+            bar.progress((i+1)/min(len(target_pool), limit))
+            try:
+                fid, _, d, src = db.get_stock_data(c)
+                if d is not None:
+                    d_real, _, _ = inject_realtime_data(d, c)
+                    n = twstock.codes[c].name if c in twstock.codes else c
+                    p = d_real['Close'].iloc[-1] if isinstance(d_real, pd.DataFrame) else d_real['Close']
+                    sort_val = -999999; info_txt = ""
+                    if isinstance(d_real, pd.DataFrame) and len(d_real) > 20:
+                        vol = d_real['Volume'].iloc[-1]; vol_prev = d_real['Volume'].iloc[-2]
+                        m5 = d_real['Close'].rolling(5).mean().iloc[-1]
+                        m20 = d_real['Close'].rolling(20).mean().iloc[-1]
+                        m60 = d_real['Close'].rolling(60).mean().iloc[-1]
+                        prev = d_real['Close'].iloc[-2]
+                        pct = ((p - prev) / prev) * 100
+                        amp = ((d_real['High'].iloc[-1] - d_real['Low'].iloc[-1]) / prev) * 100
+                        delta = d_real['Close'].diff(); u = delta.copy(); down = delta.copy(); u[u<0]=0; down[down>0]=0
+                        rs = u.rolling(14).mean() / down.abs().rolling(14).mean()
+                        rsi = (100 - 100/(1+rs)).iloc[-1]
+                        valid = False
+                        if stype == 'day': 
+                            if vol > vol_prev * 1.5 and p > d_real['Open'].iloc[-1] and p > m5 and amp > 2:
+                                sort_val = vol; info_txt = f"🔥 爆量 {int(vol/vol_prev)} 倍 | 振幅 {amp:.1f}%"; valid = True
+                        elif stype == 'short': 
+                            if m5 > m20 and p > m20 and 50 < rsi < 75:
+                                sort_val = pct; info_txt = f"🚀 多頭排列 | RSI {rsi:.0f}"; valid = True
+                        elif stype == 'long': 
+                            bias = ((p - m60)/m60)*100
+                            if p > m60 and -5 < bias < 10: 
+                                sort_val = vol; info_txt = f"🐢 季線之上 | 乖離 {bias:.1f}%"; valid = True
+                        elif stype == 'top': 
+                            if vol > 1000000: 
+                                sort_val = pct; info_txt = f"🏆 漲幅 {pct:.2f}% | 量 {int(vol/1000)}張"; valid = True
+                        if valid: raw_results.append({'c': c, 'n': n, 'p': p, 'd': d_real, 'src': src, 'val': sort_val, 'info': info_txt})
+            except: pass
+        bar.empty()
+        raw_results.sort(key=lambda x: x['val'], reverse=True)
+        top_50 = [x['c'] for x in raw_results[:50]]
+        db.save_scan_results(stype, top_50)
+        st.session_state['scan_results'] = raw_results[:50]; st.rerun() 
+
+    display_list = st.session_state['scan_results']
+    if not display_list and not do_scan and saved_codes and target_group == "🔍 全部上市櫃":
+         temp_list = []
+         for i, c in enumerate(saved_codes[:50]):
+             fid, _, d, src = db.get_stock_data(c)
+             if d is not None:
+                 d_real, _, _ = inject_realtime_data(d, c)
+                 p = d_real['Close'].iloc[-1] if isinstance(d_real, pd.DataFrame) else d_real['Close']
+                 n = twstock.codes[c].name if c in twstock.codes else c
+                 temp_list.append({'c':c, 'n':n, 'p':p, 'd':d_real, 'src':src, 'info': f"AI 推薦 #{i+1}"})
+         display_list = temp_list
+
+    if display_list:
+        for i, item in enumerate(display_list):
+            if ui.render_detailed_card(item['c'], item['n'], item['p'], item['d'], item['src'], key_prefix=f"scan_{stype}", rank=i+1, strategy_info=item['info']):
+                nav_to('analysis', item['c'], item['n']); st.rerun()
+    elif not do_scan: st.warning("請點擊上方按鈕「開始智能篩選」")
     ui.render_back_button(go_back)
