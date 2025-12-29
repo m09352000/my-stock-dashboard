@@ -24,37 +24,37 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V87", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V88", layout="wide")
 
-# --- V87: 嚴格字串清洗與比對 ---
-def find_best_match_stock_v87(text):
+# --- V88: 智慧型匹配引擎 ---
+def find_best_match_stock_v88(text):
     """
-    V87: 針對切除後的左側文字進行比對
+    V88: 結合規則清洗與多重比對的匹配邏輯
     """
-    # 1. 垃圾字過濾 (針對左側標籤)
-    garbage_words = [
+    # 1. 深度清洗
+    # 移除看盤軟體常見雜訊
+    garbage = [
         "試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", 
         "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存", "延遲", 
-        "放一", "一些", "一", "二", "三"
+        "放一", "一些", "一", "二", "三", "R", "G", "B" # RGB 可能是色碼誤判
     ]
     
-    clean_text = text.replace(" ", "").upper()
-    for w in garbage_words:
+    clean_text = text.upper()
+    for w in garbage:
         clean_text = clean_text.replace(w, "")
     
-    # 2. 移除所有看似價格的數字 (例如 "123.45")
-    clean_text = re.sub(r'\d+\.\d+', '', clean_text)
+    # 移除所有數字和小數點 (避免股價干擾)
+    # 但保留獨立的 4 碼數字 (可能是代號)
+    if not (clean_text.isdigit() and len(clean_text) == 4):
+        clean_text = re.sub(r'\d+\.\d+', '', clean_text)
+        clean_text = re.sub(r'\d+', '', clean_text) # V88: 暫時移除所有數字，依靠中文名比對 ETF
     
-    # 3. 移除括號與特殊符號
-    clean_text = re.sub(r'\(.*?\)', '', clean_text)
-    clean_text = re.sub(r'\[.*?\]', '', clean_text)
-    clean_text = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9\-]', '', clean_text).strip()
+    # 移除括號與特殊符號
+    clean_text = re.sub(r'[^\u4e00-\u9fa5a-zA-Z\-]', '', clean_text).strip()
 
     if len(clean_text) < 2: return None, None
-    # 如果只剩下數字且不是4碼，視為雜訊 (例如殘留的股價整數位)
-    if clean_text.isdigit() and len(clean_text) != 4: return None, None
 
-    # 4. 建立搜尋清單 (含ETF)
+    # 2. 建立資料庫索引
     all_codes = {}
     for code, data in twstock.codes.items():
         if data.type in ["股票", "ETF"]:
@@ -63,104 +63,113 @@ def find_best_match_stock_v87(text):
     name_to_code = {v: k for k, v in all_codes.items()}
     all_names = list(name_to_code.keys())
 
-    # A. 完全匹配 (優先)
-    if clean_text in all_codes: return clean_text, all_codes[clean_text]
+    # A. 完全匹配
     if clean_text in name_to_code: return name_to_code[clean_text], clean_text
 
-    # B. 包含搜尋 (嚴格長度限制)
+    # B. 包含搜尋 (處理 OCR 漏字)
+    # 例如: "元大台灣" -> "元大台灣50"
     for name in all_names:
-        if name in clean_text or clean_text in name:
-            # 長度差異不能超過 2，避免 "金" 對到 "國泰金"
-            if abs(len(name) - len(clean_text)) <= 2: 
+        # 去除數字後的名稱比對 (針對 ETF)
+        name_no_digit = re.sub(r'\d+', '', name)
+        
+        if len(clean_text) >= 2 and (clean_text in name_no_digit or name_no_digit in clean_text):
+            # 長度差異懲罰
+            if abs(len(name_no_digit) - len(clean_text)) <= 1:
                 return name_to_code[name], name
 
-    # C. 模糊比對 (適度門檻)
+    # C. 模糊比對
     matches = difflib.get_close_matches(clean_text, all_names, n=1, cutoff=0.6)
     if matches:
-        best_match = matches[0]
-        if abs(len(best_match) - len(clean_text)) <= 2:
-            return name_to_code[best_match], best_match
+        best = matches[0]
+        # 二次確認長度，避免 "金" -> "國泰金"
+        if abs(len(best) - len(clean_text)) <= 2:
+            return name_to_code[best], best
 
     return None, None
 
-# --- V87 重寫: 區域鎖定與多重濾鏡引擎 ---
+# --- V88 重寫: 多維度 PSM 矩陣辨識引擎 ---
 def process_image_upload(image_file):
     debug_info = {"raw_text": "", "processed_img": None, "error": None}
     found_stocks = set()
-    full_ocr_text = ""
+    full_ocr_log = ""
     
     try:
-        # 1. 載入圖片
+        # 1. 載入與預處理
         img = Image.open(image_file)
         if img.mode != 'RGB': img = img.convert('RGB')
         
-        # 2. 3x 超解析放大
-        target_width = img.width * 3
-        target_height = img.height * 3
-        img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        # 3x 放大
         w, h = img.size
+        target_w, target_h = w * 3, h * 3
+        img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
         
-        # 3. V87 核心: 區域鎖定 (Zone Locking)
-        # 直接切出左邊 45% 的區域。
-        # 這樣做可以 100% 物理隔絕右邊股價造成的干擾 (例如把價格讀成代號)
-        # 左邊切掉 12% 避開標籤 (保留空間給長檔名)
-        zone_img = img.crop((int(w * 0.12), 0, int(w * 0.45), h))
+        # 2. 建立動態掃描視窗 (Sliding Windows)
+        # 我們切出三種不同寬度的圖片，避免因切到字而辨識失敗
+        # 避開左邊 13% 的標籤
+        left_margin = int(target_w * 0.13)
         
-        # 4. 多重濾鏡疊加 (Multi-Filter Stacking)
-        # 因為字體顏色不同 (紅/綠/黃/白)，單一處理容易漏字
-        # 我們準備三種不同處理方式的圖片
+        crop_configs = [
+            (left_margin, int(target_w * 0.40)), # 窄視窗 (只看股名)
+            (left_margin, int(target_w * 0.50)), # 中視窗
+            (left_margin, int(target_w * 0.60)), # 寬視窗 (可能包含一點股價)
+        ]
         
-        images_to_process = []
+        # 3. 建立多重濾鏡
+        filters = []
         
-        # [A] 原始增強灰階 (最通用，適合各種顏色)
-        gray = zone_img.convert('L')
-        enhancer = ImageEnhance.Contrast(gray)
-        img_contrast = enhancer.enhance(2.5)
-        images_to_process.append(img_contrast)
+        # 基礎圖
+        gray = img.convert('L')
+        inverted = ImageOps.invert(gray)
+        enhancer = ImageEnhance.Contrast(inverted)
+        base_img = enhancer.enhance(2.5) # 高反差
         
-        # [B] 反轉白底黑字 (適合 Tesseract 識別)
-        img_inverted = ImageOps.invert(img_contrast)
-        images_to_process.append(img_inverted)
+        # 二值化圖 (針對亮字)
+        bin_img = base_img.point(lambda x: 255 if x > 140 else 0, mode='1')
         
-        # [C] 二值化 (針對高亮度文字，如黃色/白色)
-        thresh = 140
-        img_bin = img_contrast.point(lambda x: 255 if x > thresh else 0, mode='1')
-        images_to_process.append(img_bin)
+        filters = [base_img, bin_img]
         
-        # 儲存其中一張給使用者預覽
-        debug_info['processed_img'] = img_inverted
+        # 4. 矩陣式 OCR 掃描
+        # 3種裁切 x 2種濾鏡 x 3種 PSM 模式 = 18 次嘗試
+        
+        # PSM 模式解釋:
+        # 6: 假設單一統一文字塊 (標準)
+        # 4: 假設單一文字欄 (針對股票清單優化)
+        # 11: 尋找稀疏文字 (針對排版亂掉的情況)
+        psm_modes = [6, 4, 11]
+        
+        # 為了效能，我們先用中間寬度(45%)做預覽圖
+        preview_crop = base_img.crop((left_margin, 0, int(target_w*0.45), target_h))
+        debug_info['processed_img'] = preview_crop
 
-        # 5. 執行 OCR (對三張圖都跑)
-        # 使用 psm 6 (假設是單一文字塊)
-        for i, proc_img in enumerate(images_to_process):
-            # 混合模式 (中文+英文)
-            text = pytesseract.image_to_string(proc_img, lang='chi_tra+eng', config='--psm 6')
-            full_ocr_text += f"\n--- Filter {i} ---\n" + text
+        for crop_w_start, crop_w_end in crop_configs:
+            for filter_img in filters:
+                # 裁切
+                current_crop = filter_img.crop((crop_w_start, 0, crop_w_end, target_h))
+                
+                for psm in psm_modes:
+                    config = f'--psm {psm}'
+                    # 雙語辨識
+                    text = pytesseract.image_to_string(current_crop, lang='chi_tra+eng', config=config)
+                    full_ocr_log += f"\n--- Crop {crop_w_end} | Filter | PSM {psm} ---\n{text}"
+                    
+                    # 即時解析
+                    lines = text.split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        if len(line) < 2: continue
+                        
+                        sid, sname = find_best_match_stock_v88(line)
+                        if sid:
+                            found_stocks.add((sid, sname))
 
-        debug_info['raw_text'] = full_ocr_text
-
-        # 6. 解析
-        lines = full_ocr_text.split('\n')
-        seen_ids = set()
-        
-        for line in lines:
-            line = line.strip()
-            if len(line) < 2: continue
-            
-            # 使用 V87 嚴格比對
-            sid, sname = find_best_match_stock_v87(line)
-            
-            if sid and sid not in seen_ids:
-                found_stocks.add((sid, sname))
-                seen_ids.add(sid)
-
+        debug_info['raw_text'] = full_ocr_log
         return list(found_stocks), debug_info
 
     except Exception as e:
         debug_info['error'] = str(e)
         return [], debug_info
 
-# --- 以下維持 V79~V86 核心功能 (不簡化) ---
+# --- 以下維持 V79~V87 核心功能 (不簡化) ---
 
 def inject_realtime_data(df, code):
     if df is None or df.empty: return df, None, None
@@ -169,27 +178,16 @@ def inject_realtime_data(df, code):
         if real['success']:
             rt = real['realtime']
             if rt['latest_trade_price'] == '-' or rt['latest_trade_price'] is None: return df, None, None
-            
             latest = float(rt['latest_trade_price'])
             high = float(rt['high']); low = float(rt['low']); open_p = float(rt['open'])
             vol = float(rt['accumulate_trade_volume'])
-            
-            rt_pack = {
-                'latest_trade_price': latest, 'high': high, 'low': low, 'open': open_p,
-                'accumulate_trade_volume': vol,
-                'previous_close': float(df['Close'].iloc[-2]) if len(df)>1 else open_p
-            }
-            
+            rt_pack = {'latest_trade_price': latest, 'high': high, 'low': low, 'open': open_p, 'accumulate_trade_volume': vol, 'previous_close': float(df['Close'].iloc[-2]) if len(df)>1 else open_p}
             last_idx = df.index[-1]
             df.at[last_idx, 'Close'] = latest
             df.at[last_idx, 'High'] = max(high, df.at[last_idx, 'High'])
             df.at[last_idx, 'Low'] = min(low, df.at[last_idx, 'Low'])
             df.at[last_idx, 'Volume'] = int(vol) * 1000
-            
-            bid_ask = {
-                'bid_price': rt.get('best_bid_price', []), 'bid_volume': rt.get('best_bid_volume', []),
-                'ask_price': rt.get('best_ask_price', []), 'ask_volume': rt.get('best_ask_volume', [])
-            }
+            bid_ask = {'bid_price': rt.get('best_bid_price', []), 'bid_volume': rt.get('best_bid_volume', []), 'ask_price': rt.get('best_ask_price', []), 'ask_volume': rt.get('best_ask_volume', [])}
             return df, bid_ask, rt_pack
     except: return df, None, None
     return df, None, None
@@ -224,7 +222,7 @@ check_session()
 
 if not st.session_state['scan_pool']:
     try:
-        all_codes = [c for c in twstock.codes.values() if c.type in ["股票", "ETF"]] # V87 保留 ETF
+        all_codes = [c for c in twstock.codes.values() if c.type in ["股票", "ETF"]]
         st.session_state['scan_pool'] = sorted([c.code for c in all_codes])
         groups = sorted(list(set(c.group for c in all_codes if c.group)))
         st.session_state['all_groups'] = ["🔍 全部上市櫃"] + groups
@@ -315,14 +313,14 @@ with st.sidebar:
             st.query_params.clear()
             nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 87.0 (區域鎖定版)")
+    st.markdown("---"); st.caption("Ver: 88.0 (多維度PSM矩陣版)")
 
 # --- Main Logic ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V87")
-    st.markdown("### 🚀 V87 更新：區域鎖定對焦引擎\n* **🔒 區域鎖定**：強制裁切畫面左側 45%，物理隔絕股價干擾，杜絕幻覺。\n* **🎞️ 多重濾鏡**：同時分析原圖、反轉、高亮三種版本，確保各色字體不漏接。\n* **🎯 嚴格比對**：保留 ETF 支援，並強化字串長度檢查。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V88")
+    st.markdown("### 🚀 V88 更新：PSM 多維矩陣辨識\n* **🧠 三重辨識大腦**：同時使用區塊、單欄、稀疏三種模式進行 OCR，大幅提升直排清單辨識率。\n* **🔍 動態視窗掃描**：自動調整裁切範圍，不錯過長檔名。\n* **🛡️ 嚴格ETF校正**：針對 ETF 名稱進行特殊清洗與比對。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員中心")
@@ -361,11 +359,11 @@ elif mode == 'watch':
             if code: db.update_watchlist(uid, code, "add"); st.toast(f"已加入: {name}", icon="✅"); time.sleep(0.5); st.rerun()
             else: st.error(f"找不到: {add_c}")
 
-        with st.expander("📸 截圖匯入 (V87 區域鎖定版)", expanded=True):
+        with st.expander("📸 截圖匯入 (V88 PSM矩陣版)", expanded=True):
             if is_ocr_ready():
                 uploaded_file = st.file_uploader("上傳自選股截圖 (支援各家券商黑底介面)", type=['png', 'jpg', 'jpeg'])
                 if uploaded_file:
-                    with st.spinner("AI 正在進行區域鎖定與多重濾鏡分析..."): 
+                    with st.spinner("AI 正在啟動多重引擎 (PSM Matrix) 進行掃描..."): 
                         found_list, debug_info = process_image_upload(uploaded_file)
                     
                     if found_list:
@@ -382,10 +380,10 @@ elif mode == 'watch':
                                 st.rerun()
                         else: st.info("所有商品都已在清單中。")
                         
-                        with st.expander("👀 查看 AI 鎖定畫面"):
+                        with st.expander("👀 查看 AI 掃描過程"):
                             if debug_info['processed_img']:
-                                st.image(debug_info['processed_img'], caption="左側 45% 鎖定區域")
-                            st.text("--- 辨識原始資料 ---")
+                                st.image(debug_info['processed_img'], caption="45% 視窗掃描預覽")
+                            st.text("--- PSM 矩陣掃描結果 ---")
                             st.text(debug_info['raw_text'])
                     else: 
                         st.error("未能辨識有效商品，請確認圖片清晰度。")
@@ -415,7 +413,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V87)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V88)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
