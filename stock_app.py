@@ -1,194 +1,25 @@
 import streamlit as st
 import time
-import twstock
 import pandas as pd
-import re
-import importlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
-import stock_db as db
-import stock_ui as ui
+# 匯入我們拆分好的模組
+import logic_database as db
+import logic_ai as ai
+import ui_components as ui
+import config_data as config
 
-try:
-    import knowledge
-    importlib.reload(knowledge)
-    from knowledge import STOCK_TERMS, STRATEGY_DESC, KLINE_PATTERNS
-except ImportError:
-    STOCK_TERMS = {}; STRATEGY_DESC = "知識庫載入失敗"; KLINE_PATTERNS = {}
-
-st.set_page_config(page_title="全球股市戰情室 V103", layout="wide", page_icon="🌎")
-
-# --- V103: 美股熱門清單 ---
-US_STOCK_POOL = [
-    "NVDA", "TSLA", "AAPL", "MSFT", "GOOG", "AMZN", "META", "AMD", "INTC", "TSM", 
-    "AVGO", "QCOM", "ARM", "MU", "SMCI", "NFLX", "ORCL", "CRM", "ADBE", "IBM",
-    "ASML", "AMAT", "LRCX", "KLAC", "TXN", "ADI", "MRVL", "DELL", "HPQ",
-    "MSTR", "COIN", "MARA", "RIOT", "CLSK", "HOOD", "PYPL", "SQ", "V", "MA",
-    "BABA", "BIDU", "JD", "PDD", "NIO", "XPEV", "LI",
-    "SPY", "QQQ", "SOXL", "TQQQ", "ARKK", "TLT", "GLD", "SLV", "SMH", "XLF"
-]
-
-# --- V103: 深度診斷報告 (個股分析頁用) ---
-def generate_detailed_report(df, score, weekly_prob, monthly_prob):
-    latest = df.iloc[-1]
-    p = latest['Close']
-    m5 = df['Close'].rolling(5).mean().iloc[-1]
-    m20 = df['Close'].rolling(20).mean().iloc[-1]
-    m60 = df['Close'].rolling(60).mean().iloc[-1]
-    vol = latest['Volume']
-    vol_ma5 = df['Volume'].rolling(5).mean().iloc[-1]
-    
-    trend_txt = "【趨勢型態】\n"
-    if p > m5 and m5 > m20 and m20 > m60:
-        trend_txt += "呈現「多頭排列」的完美進攻型態。股價站穩五日線之上，均線全面向上發散，是強勢主升段特徵，上方無明顯壓力。"
-    elif p < m5 and m5 < m20 and m20 < m60:
-        trend_txt += "呈現「空頭排列」的下跌型態。股價遭均線蓋頭反壓，上方套牢賣壓沈重，不宜貿然搶進。"
-    elif p > m20:
-        trend_txt += "股價位於月線(生命線)之上，屬於中多格局，波段趨勢看好。"
-    else:
-        trend_txt += "股價跌破月線，短線轉弱，需儘快站回否則整理期將拉長。"
-
-    vol_txt = "\n\n【量能籌碼】\n"
-    if vol > vol_ma5 * 1.5:
-        vol_txt += f"今日爆出大量 (五日均量的 {vol/vol_ma5:.1f} 倍)！主力強勢表態，有利行情延續。"
-    elif vol < vol_ma5 * 0.6:
-        vol_txt += "今日呈現「量縮整理」，市場觀望氣氛濃厚。"
-    else:
-        vol_txt += "量能溫和，屬於健康的換手量。"
-
-    prob_txt = "\n\n【獲利機率預測】\n"
-    prob_txt += f"● **本週 (短線)**：**{weekly_prob}%**。{( '🔥 極高！' if weekly_prob > 80 else '⚠️ 需謹慎。' )}\n"
-    prob_txt += f"● **本月 (波段)**：**{monthly_prob}%**。{( '💎 趨勢穩健。' if monthly_prob > 70 else '⏳ 建議觀望。' )}"
-
-    return trend_txt + vol_txt + prob_txt
-
-# --- V103: 掃描結果理由生成器 (列表頁用) ---
-def generate_scan_reason(df):
-    """
-    根據技術指標，自動生成一句「有憑有據」的推薦理由
-    """
-    reasons = []
-    latest = df.iloc[-1]
-    p = latest['Close']
-    m5 = df['Close'].rolling(5).mean().iloc[-1]
-    m20 = df['Close'].rolling(20).mean().iloc[-1]
-    m60 = df['Close'].rolling(60).mean().iloc[-1]
-    vol = latest['Volume']
-    vol_ma5 = df['Volume'].rolling(5).mean().iloc[-1]
-    
-    # MACD
-    exp12 = df['Close'].ewm(span=12, adjust=False).mean()
-    exp26 = df['Close'].ewm(span=26, adjust=False).mean()
-    macd = exp12 - exp26
-    signal = macd.ewm(span=9, adjust=False).mean()
-    
-    # RSI
-    delta = df['Close'].diff()
-    u = delta.copy(); d = delta.copy(); u[u<0]=0; d[d>0]=0
-    rs = u.rolling(14).mean() / d.abs().rolling(14).mean()
-    rsi = (100 - 100/(1+rs)).iloc[-1]
-
-    # 1. 趨勢理由
-    if p > m5 and m5 > m20 and m20 > m60: reasons.append("均線多頭排列")
-    elif p > m20 and m20 > m60: reasons.append("站穩月季線")
-    elif p > m5 and p > m20: reasons.append("短線轉強")
-    
-    # 2. 量能理由
-    if vol > vol_ma5 * 2.0: reasons.append(f"爆量{vol/vol_ma5:.1f}倍")
-    elif vol > vol_ma5 * 1.3: reasons.append("量能增溫")
-    
-    # 3. 指標理由
-    if macd.iloc[-1] > signal.iloc[-1] and macd.iloc[-2] <= signal.iloc[-2]: reasons.append("MACD黃金交叉")
-    elif macd.iloc[-1] > signal.iloc[-1]: reasons.append("MACD多頭")
-    
-    if 50 < rsi < 75: reasons.append(f"RSI強勢({int(rsi)})")
-    elif rsi < 20: reasons.append("RSI超賣反彈")
-    
-    # 4. 價格理由
-    if p > df['High'].iloc[-1] * 0.99: reasons.append("收最高")
-    
-    # 組合
-    if not reasons: return "技術面整理中"
-    return " + ".join(reasons[:3]) # 取前三個最強的理由
-
-def analyze_stock_battle_data(df):
-    if df is None or len(df) < 30: return None
-    latest = df.iloc[-1]
-    close = latest['Close']
-    
-    ma5 = df['Close'].rolling(5).mean().iloc[-1]
-    ma20 = df['Close'].rolling(20).mean().iloc[-1]
-    ma60 = df['Close'].rolling(60).mean().iloc[-1]
-    std20 = df['Close'].rolling(20).std().iloc[-1]
-    
-    exp12 = df['Close'].ewm(span=12, adjust=False).mean()
-    exp26 = df['Close'].ewm(span=26, adjust=False).mean()
-    macd = exp12 - exp26
-    signal = macd.ewm(span=9, adjust=False).mean()
-    
-    delta = df['Close'].diff()
-    u = delta.copy(); d = delta.copy()
-    u[u < 0] = 0; d[d > 0] = 0
-    rs = u.rolling(14).mean() / d.abs().rolling(14).mean()
-    rsi = (100 - 100/(1+rs)).iloc[-1]
-    
-    vol_ma5 = df['Volume'].rolling(5).mean().iloc[-1]
-    vol_ratio = latest['Volume'] / vol_ma5 if vol_ma5 > 0 else 1
-    
-    w_score = 50 
-    if close > ma5: w_score += 15
-    if ma5 > ma20: w_score += 10
-    if vol_ratio > 1.2: w_score += 10
-    if 50 < rsi < 80: w_score += 10
-    elif rsi > 80: w_score -= 10
-    weekly_prob = min(max(w_score, 10), 98)
-
-    m_score = 50
-    if close > ma20: m_score += 20
-    if ma20 > ma60: m_score += 20
-    if macd.iloc[-1] > signal.iloc[-1]: m_score += 10
-    monthly_prob = min(max(m_score, 10), 95)
-
-    total_score = (weekly_prob + monthly_prob) / 2
-    detailed_report = generate_detailed_report(df, total_score, weekly_prob, monthly_prob)
-
-    short_action = "積極買進" if weekly_prob >= 70 else "拉回佈局" if weekly_prob >= 50 else "觀望"
-    mid_trend = "多頭" if ma20 > ma60 else "整理"
-    long_bias = ((close - ma60) / ma60) * 100
-    long_action = "乖離過大" if long_bias > 20 else "超跌" if long_bias < -15 else "合理"
-    
-    return {
-        "score": total_score, "weekly_prob": weekly_prob, "monthly_prob": monthly_prob,
-        "report": detailed_report,
-        "heat": "🔥🔥🔥 極熱" if vol_ratio > 2.0 else "🔥 溫熱" if vol_ratio > 1.2 else "☁️ 普通",
-        "heat_color": "#FF0000" if vol_ratio > 2.0 else "#FF4500",
-        "short_action": short_action, "short_target": f"{close*1.05:.2f}",
-        "mid_trend": mid_trend, "mid_action": "續抱" if close > ma20 else "減碼", "mid_support": f"{ma20:.2f}",
-        "long_action": long_action, "long_ma60": f"{ma60:.2f}",
-        "pressure": ma20 + 2*std20, "support": ma20 - 2*std20, 
-        "suggest_price": close if total_score > 70 else ma20, "close": close
-    }
-
-def solve_stock_id(val):
-    val = str(val).strip().upper()
-    if not val: return None, None
-    if val.isdigit() and len(val) == 4:
-        name = val
-        if val in twstock.codes: name = twstock.codes[val].name
-        return val, name
-    if re.match(r'^[A-Z]+$', val): return val, val 
-    for code, data in twstock.codes.items():
-        if data.type in ["股票", "ETF"]:
-            if val == data.name: return code, data.name
-    for code, data in twstock.codes.items():
-        if data.type in ["股票", "ETF"]:
-            if val in data.name: return code, data.name
-    return None, None
+st.set_page_config(page_title="全球股市戰情室 V104", layout="wide", page_icon="🌎")
 
 # --- Session 初始化 ---
 if 'market_type' not in st.session_state: st.session_state['market_type'] = 'TW'
+if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome'
+if 'current_stock' not in st.session_state: st.session_state['current_stock'] = ''
+if 'current_name' not in st.session_state: st.session_state['current_name'] = ''
+if 'scan_results' not in st.session_state: st.session_state['scan_results'] = []
 if 'scan_pool_tw' not in st.session_state:
     try:
+        import twstock
         all_codes = [c for c in twstock.codes.values() if c.type in ["股票", "ETF"]]
         st.session_state['scan_pool_tw'] = sorted([c.code for c in all_codes])
         groups = sorted(list(set(c.group for c in all_codes if c.group)))
@@ -196,11 +27,6 @@ if 'scan_pool_tw' not in st.session_state:
     except:
         st.session_state['scan_pool_tw'] = ['2330', '2317', '2454']
         st.session_state['all_groups_tw'] = ["全部"]
-
-if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome'
-if 'current_stock' not in st.session_state: st.session_state['current_stock'] = ''
-if 'current_name' not in st.session_state: st.session_state['current_name'] = ''
-if 'scan_results' not in st.session_state: st.session_state['scan_results'] = []
 
 def nav_to(mode, code=None, name=None):
     if code: 
@@ -210,7 +36,7 @@ def nav_to(mode, code=None, name=None):
 
 def handle_search():
     val = st.session_state.search_input_val
-    code, name = solve_stock_id(val)
+    code, name = db.solve_stock_id(val)
     if code:
         nav_to('analysis', code, name)
         st.session_state.search_input_val = ""
@@ -254,18 +80,16 @@ with st.sidebar:
     st.divider()
     if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.caption("Ver: 103.0 (分析引擎升級版)")
+    st.caption("Ver: 104.0 (模組化重構版)")
 
-# --- 主程式 ---
+# --- 主頁面邏輯 ---
 mode = st.session_state['view_mode']
 m_type = st.session_state['market_type']
 
 if mode == 'welcome':
-    ui.render_header(f"👋 {m_type} 戰情室 V103")
-    if m_type == 'TW':
-        st.info("🇹🇼 台股模式啟用。資料來源：TWSE / Yahoo Finance。")
-    else:
-        st.success("🇺🇸 美股模式啟用。資料來源：Yahoo Finance (Realtime)。\n\n💡 試試輸入 **NVDA, TSLA, AAPL** 進行 AI 診斷！")
+    ui.render_header(f"👋 {m_type} 戰情室 V104")
+    if m_type == 'TW': st.info("🇹🇼 台股模式啟用。資料來源：TWSE / Yahoo Finance。")
+    else: st.success("🇺🇸 美股模式啟用。資料來源：Yahoo Finance (Realtime)。")
 
 elif mode == 'analysis':
     code = st.session_state['current_stock']
@@ -298,7 +122,7 @@ elif mode == 'analysis':
             ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, "一般", vol_disp, vy, va, vs, 0, 0, None, None, rt_pack, unit=unit, code=code)
             ui.render_chart(df, f"{name} K線圖", db.get_color_settings(code))
             
-            battle = analyze_stock_battle_data(df)
+            battle = ai.analyze_stock_battle_data(df)
             if battle: ui.render_ai_battle_dashboard(battle)
 
     ui.render_back_button(lambda: nav_to('welcome'))
@@ -314,8 +138,10 @@ elif mode == 'scan':
     if not display_list:
         if m_type == 'TW':
             pool = st.session_state['scan_pool_tw']
-            if target != "🔍 全部上市櫃": pool = [c for c in pool if c in twstock.codes and twstock.codes[c].group == target]
-        else: pool = US_STOCK_POOL
+            if target != "🔍 全部上市櫃": 
+                import twstock
+                pool = [c for c in pool if c in twstock.codes and twstock.codes[c].group == target]
+        else: pool = config.US_STOCK_POOL
         
         limit = st.session_state.get('scan_limit', 30)
         bar = st.progress(0); raw_results = []; count = 0
@@ -326,7 +152,7 @@ elif mode == 'scan':
             try:
                 _, _, df, src = db.get_stock_data(c)
                 if df is not None and len(df) > 30:
-                    battle = analyze_stock_battle_data(df)
+                    battle = ai.analyze_stock_battle_data(df)
                     score = battle['score']
                     w_prob = battle['weekly_prob']
                     
@@ -335,10 +161,9 @@ elif mode == 'scan':
                     vol_ma5 = df['Volume'].rolling(5).mean().iloc[-1]
                     ma5 = df['Close'].rolling(5).mean().iloc[-1]
                     
-                    # 生成詳細理由 (V103 重點)
-                    scan_reason = generate_scan_reason(df)
-                    
+                    scan_reason = ai.generate_scan_reason(df)
                     valid = False
+                    
                     if stype == 'tomorrow_star':
                         if close > open_p and close > high * 0.985 and vol > vol_ma5 and close > ma5: valid = True; score += 10
                     elif stype == 'super_win':
@@ -353,8 +178,9 @@ elif mode == 'scan':
                          
                     if valid:
                         n = c
-                        if m_type == 'TW' and c in twstock.codes: n = twstock.codes[c].name
-                        # 這裡將 scan_reason 傳入 info 欄位
+                        if m_type == 'TW':
+                            import twstock
+                            if c in twstock.codes: n = twstock.codes[c].name
                         raw_results.append({'c': c, 'n': n, 'p': close, 'info': scan_reason, 'score': score, 'w_prob': w_prob, 'd': df, 'src': src})
                         count += 1
                 time.sleep(0.01)
@@ -371,4 +197,23 @@ elif mode == 'scan':
             if ui.render_detailed_card(item['c'], item['n'], item['p'], item['d'], item['src'], key_prefix=f"scan_{stype}", rank=i+1, strategy_info=item['info'], score=item['score'], w_prob=item.get('w_prob', 50)): 
                 nav_to('analysis', item['c'], item['n']); st.rerun()
     else: st.warning("無符合條件標的")
+    ui.render_back_button(lambda: nav_to('welcome'))
+
+elif mode == 'learn':
+    ui.render_header("📖 股市新手村 (終極版)")
+    t1, t2, t3 = st.tabs(["策略解密", "名詞百科", "K線戰法 SOP"])
+    with t1: st.markdown(config.STRATEGY_DESC)
+    with t2:
+        for cat, items in config.STOCK_TERMS.items():
+            with st.expander(cat, expanded=True):
+                for k, v in items.items(): ui.render_term_card(k, v)
+    with t3:
+        st.info("💡 K 線反轉訊號與操作 SOP")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("🔥 多方訊號")
+            for k, v in config.KLINE_PATTERNS.get('bull', {}).items(): ui.render_kline_pattern_card(k, v)
+        with c2:
+            st.subheader("❄️ 空方訊號")
+            for k, v in config.KLINE_PATTERNS.get('bear', {}).items(): ui.render_kline_pattern_card(k, v)
     ui.render_back_button(lambda: nav_to('welcome'))
