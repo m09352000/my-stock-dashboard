@@ -9,15 +9,14 @@ from datetime import datetime, timedelta, timezone
 import stock_db as db
 import stock_ui as ui
 
-# 嘗試載入知識庫，若失敗則給空值，避免程式崩潰
 try:
     import knowledge
     importlib.reload(knowledge)
     from knowledge import STOCK_TERMS, STRATEGY_DESC, KLINE_PATTERNS
 except ImportError:
-    STOCK_TERMS = {}; STRATEGY_DESC = "知識庫載入失敗，請檢查 knowledge.py"; KLINE_PATTERNS = {}
+    STOCK_TERMS = {}; STRATEGY_DESC = "知識庫載入失敗"; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="股市戰情室 V96", layout="wide", page_icon="📈")
+st.set_page_config(page_title="股市戰情室 V99", layout="wide", page_icon="📈")
 
 # --- 核心運算引擎 ---
 def analyze_stock_battle_data(df):
@@ -77,7 +76,6 @@ def analyze_stock_battle_data(df):
     }
 
 def inject_realtime_data(df, code):
-    # 簡單封裝，直接使用 DB 抓回來的資料
     if df is None or df.empty: return df, None, None
     latest = df.iloc[-1]
     rt_pack = {
@@ -90,36 +88,19 @@ def inject_realtime_data(df, code):
     return df, None, rt_pack
 
 def solve_stock_id(val):
-    """
-    V96 修復版搜尋邏輯：
-    1. 清理輸入
-    2. 如果是4碼數字 -> 直接回傳
-    3. 如果是中文 -> 遍歷 twstock 代號庫反查
-    """
     val = str(val).strip()
     if not val: return None, None
-    
-    # 1. 嘗試直接當作代號
     clean_code = re.sub(r'[^\d]', '', val)
     if len(clean_code) == 4:
-        # 嘗試找名稱 (選用)
         name = clean_code
-        if clean_code in twstock.codes:
-            name = twstock.codes[clean_code].name
+        if clean_code in twstock.codes: name = twstock.codes[clean_code].name
         return clean_code, name
-        
-    # 2. 嘗試當作中文名稱搜尋
     for code, data in twstock.codes.items():
         if data.type in ["股票", "ETF"]:
-            if val == data.name: # 完全符合
-                return code, data.name
-            
-    # 3. 模糊搜尋 (如果完全符合沒找到)
+            if val == data.name: return code, data.name
     for code, data in twstock.codes.items():
         if data.type in ["股票", "ETF"]:
-            if val in data.name:
-                return code, data.name
-                
+            if val in data.name: return code, data.name
     return None, None
 
 # --- Session 初始化 ---
@@ -149,7 +130,7 @@ def handle_search():
     code, name = solve_stock_id(val)
     if code:
         nav_to('analysis', code, name)
-        st.session_state.search_input_val = "" # 清空
+        st.session_state.search_input_val = ""
     else:
         st.toast(f"找不到 '{val}'，請確認名稱或代號", icon="⚠️")
 
@@ -163,7 +144,9 @@ with st.sidebar:
         st.markdown("### 🤖 AI 掃描雷達")
         sel_group = st.selectbox("1️⃣ 範圍", st.session_state.get('all_groups', ["全部"]))
         
+        # V99: 新增「明日之星」策略
         strat_map = {
+            "🌅 明日之星潛力股": "tomorrow_star", # New!
             "💎 超強力推薦必賺": "super_win",
             "⚡ 強力當沖": "day",
             "📈 穩健短線": "short",
@@ -177,55 +160,46 @@ with st.sidebar:
             st.session_state['scan_target_group'] = sel_group
             st.session_state['current_stock'] = strat_map[sel_strat_name]
             st.session_state['scan_limit'] = scan_limit
-            st.session_state['scan_results'] = [] # 清空舊結果
+            st.session_state['scan_results'] = []
             nav_to('scan', strat_map[sel_strat_name])
             st.rerun()
 
     st.divider()
     if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.caption("Ver: 96.0 (修復版)")
+    st.caption("Ver: 99.0 (明日之星版)")
 
 # --- 主程式 ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 股市戰情室 V96")
-    st.success("✅ 系統修復報告：\n1. 排名徽章樣式已優化 (Flexbox置中)。\n2. 搜尋功能已修復 (支援代號與中文名稱)。\n3. 新手村內容已回歸。")
+    ui.render_header("👋 股市戰情室 V99")
+    st.success("✅ 新功能上線：**「🌅 明日之星潛力股」**\n專為想佈局明天的投資人設計，尋找今日收盤強勢、動能有望延續的標的。")
 
 elif mode == 'analysis':
     code = st.session_state['current_stock']
     name = st.session_state['current_name']
     
-    # 畫面容器
     main_placeholder = st.empty()
-    
     with main_placeholder.container():
         ui.render_header(f"{name} ({code})", show_monitor=True)
-        
-        # 1. 抓資料
         fid, stock, df, src = db.get_stock_data(code)
         
         if src == "fail":
             st.error(f"⚠️ 無法取得 {code} 資料。")
         else:
-            # 2. 數據處理
             df, _, rt_pack = inject_realtime_data(df, code)
-            
             curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]
             chg = curr - prev; pct = (chg/prev)*100
             high = df['High'].iloc[-1]; low = df['Low'].iloc[-1]
             amp = ((high - low) / prev) * 100
             vol = df['Volume'].iloc[-1]
-            
             vy = df['Volume'].iloc[-2]
             va = df['Volume'].rolling(5).mean().iloc[-1]
             vs = "爆量" if vol > vy*1.5 else "量縮" if vol < vy*0.6 else "正常"
             
-            # 3. 渲染
             info = stock.info.get('longBusinessSummary', '')
             ui.render_company_profile(db.translate_text(info))
-            
             ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, "一般", vol, vy, va, vs, 0, 0, None, None, rt_pack)
             ui.render_chart(df, f"{name} K線圖", db.get_color_settings(code))
             
@@ -237,7 +211,6 @@ elif mode == 'analysis':
 elif mode == 'learn':
     ui.render_header("📖 股市新手村")
     t1, t2, t3 = st.tabs(["策略說明", "名詞解釋", "K線型態"])
-    
     with t1: st.markdown(STRATEGY_DESC)
     with t2:
         for cat, items in STOCK_TERMS.items():
@@ -252,21 +225,23 @@ elif mode == 'learn':
         with c2:
             st.subheader("❄️ 空方訊號")
             for k, v in KLINE_PATTERNS.get('bear', {}).items(): ui.render_kline_pattern_card(k, v)
-            
     ui.render_back_button(lambda: nav_to('welcome'))
 
 elif mode == 'scan':
     stype = st.session_state['current_stock']
     target = st.session_state.get('scan_target_group', '全部')
-    title_map = {'super_win': '💎 超強力推薦必賺', 'day': '⚡ 強力當沖', 'short': '📈 穩健短線'}
+    title_map = {
+        'tomorrow_star': '🌅 明日之星潛力股',
+        'super_win': '💎 超強力推薦必賺', 
+        'day': '⚡ 強力當沖', 
+        'short': '📈 穩健短線'
+    }
     ui.render_header(f"🤖 {target} ⨉ {title_map.get(stype, stype)}")
     
     display_list = st.session_state.get('scan_results', [])
     
-    # 如果列表是空的，執行掃描
     if not display_list:
         pool = st.session_state['scan_pool']
-        # 根據群組篩選
         if target != "🔍 全部上市櫃":
             pool = [c for c in pool if c in twstock.codes and twstock.codes[c].group == target]
         
@@ -280,34 +255,53 @@ elif mode == 'scan':
             bar.progress(min((count+1)/limit, 1.0))
             
             try:
-                # 這裡使用 db.get_stock_data
                 _, _, df, src = db.get_stock_data(c)
                 if df is not None and len(df) > 30:
                     battle = analyze_stock_battle_data(df)
                     score = battle['score']
                     
+                    # 數據準備
+                    close = df['Close'].iloc[-1]
+                    open_p = df['Open'].iloc[-1]
+                    high = df['High'].iloc[-1]
+                    low = df['Low'].iloc[-1]
+                    vol = df['Volume'].iloc[-1]
+                    vol_ma5 = df['Volume'].rolling(5).mean().iloc[-1]
+                    ma5 = df['Close'].rolling(5).mean().iloc[-1]
+                    ma20 = df['Close'].rolling(20).mean().iloc[-1]
+                    
                     valid = False
                     info_txt = ""
                     
-                    if stype == 'super_win':
+                    # --- 策略邏輯 ---
+                    if stype == 'tomorrow_star':
+                        # 明日之星邏輯：
+                        # 1. 實體紅K (收 > 開)
+                        # 2. 收在相對高點 (收盤價 > 最高價 * 0.985) -> 代表尾盤有力
+                        # 3. 量能大於均量 (Vol > Vol_MA5) -> 有人氣
+                        # 4. 趨勢向上 (收 > MA5)
+                        if close > open_p and close > high * 0.985 and vol > vol_ma5 and close > ma5:
+                            valid = True
+                            score += 10 # 加分
+                            info_txt = "尾盤強勢 | 蓄勢待發"
+                            
+                    elif stype == 'super_win':
                         if score >= 60: valid = True; info_txt = f"趨勢強 | 評分 {score}"
                     elif stype == 'day':
-                        vol = df['Volume'].iloc[-1]; vy = df['Volume'].iloc[-2]
-                        if vol > vy*1.5: valid = True; info_txt = "爆量攻擊"
+                        if vol > df['Volume'].iloc[-2]*1.5: valid = True; info_txt = "爆量攻擊"
                     elif stype == 'short':
                         if score >= 40: valid = True; info_txt = "多頭排列"
                     elif stype == 'top':
-                         if df['Volume'].iloc[-1] > 2000: valid = True; info_txt = "熱門股"
+                         if vol > 2000: valid = True; info_txt = "熱門股"
                          
                     if valid:
                         n = twstock.codes[c].name if c in twstock.codes else c
-                        raw_results.append({'c': c, 'n': n, 'p': df['Close'].iloc[-1], 'info': info_txt, 'score': score, 'd': df, 'src': src})
+                        raw_results.append({'c': c, 'n': n, 'p': close, 'info': info_txt, 'score': score, 'd': df, 'src': src})
                         count += 1
                 time.sleep(0.01)
             except: pass
             
         bar.empty()
-        # 排序：高分在前
         raw_results.sort(key=lambda x: x['score'], reverse=True)
         st.session_state['scan_results'] = raw_results
         display_list = raw_results
