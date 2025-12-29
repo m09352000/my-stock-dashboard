@@ -16,24 +16,19 @@ try:
 except ImportError:
     STOCK_TERMS = {}; STRATEGY_DESC = "知識庫載入失敗"; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="全球股市戰情室 V101", layout="wide", page_icon="🌎")
+st.set_page_config(page_title="全球股市戰情室 V102", layout="wide", page_icon="🌎")
 
-# --- V101: 美股熱門清單 (手動維護的 AI 掃描池) ---
+# --- 美股熱門清單 ---
 US_STOCK_POOL = [
-    # 七巨頭與科技
     "NVDA", "TSLA", "AAPL", "MSFT", "GOOG", "AMZN", "META", "AMD", "INTC", "TSM", 
     "AVGO", "QCOM", "ARM", "MU", "SMCI", "NFLX", "ORCL", "CRM", "ADBE", "IBM",
-    # 晶片與硬體
     "ASML", "AMAT", "LRCX", "KLAC", "TXN", "ADI", "MRVL", "DELL", "HPQ",
-    # 區塊鏈與金融
     "MSTR", "COIN", "MARA", "RIOT", "CLSK", "HOOD", "PYPL", "SQ", "V", "MA",
-    # 熱門中概
     "BABA", "BIDU", "JD", "PDD", "NIO", "XPEV", "LI",
-    # 熱門 ETF
     "SPY", "QQQ", "SOXL", "TQQQ", "ARKK", "TLT", "GLD", "SLV", "SMH", "XLF"
 ]
 
-# --- 深度診斷生成器 (完全保留 V100 內容) ---
+# --- 深度診斷報告 ---
 def generate_detailed_report(df, score, weekly_prob, monthly_prob):
     latest = df.iloc[-1]
     p = latest['Close']
@@ -128,13 +123,11 @@ def analyze_stock_battle_data(df):
 def solve_stock_id(val):
     val = str(val).strip().upper()
     if not val: return None, None
-    if val.isdigit() and len(val) == 4: # 台股
+    if val.isdigit() and len(val) == 4:
         name = val
         if val in twstock.codes: name = twstock.codes[val].name
         return val, name
-    if re.match(r'^[A-Z]+$', val): # 美股
-        return val, val 
-    # 台股名稱反查
+    if re.match(r'^[A-Z]+$', val): return val, val 
     for code, data in twstock.codes.items():
         if data.type in ["股票", "ETF"]:
             if val == data.name: return code, data.name
@@ -144,7 +137,7 @@ def solve_stock_id(val):
     return None, None
 
 # --- Session 初始化 ---
-if 'market_type' not in st.session_state: st.session_state['market_type'] = 'TW' # 預設台股
+if 'market_type' not in st.session_state: st.session_state['market_type'] = 'TW'
 if 'scan_pool_tw' not in st.session_state:
     try:
         all_codes = [c for c in twstock.codes.values() if c.type in ["股票", "ETF"]]
@@ -175,26 +168,20 @@ def handle_search():
     else:
         st.toast(f"找不到 '{val}'", icon="⚠️")
 
-# --- 側邊欄 Sidebar (V101: 雙戰情室) ---
+# --- 側邊欄 ---
 with st.sidebar:
-    # 市場切換
     market = st.radio("🌍 選擇戰情室", ["🇹🇼 台股戰情室", "🇺🇸 美股戰情室"], index=0 if st.session_state['market_type']=='TW' else 1)
     st.session_state['market_type'] = 'TW' if "台股" in market else 'US'
-    
     st.divider()
-    
-    # 搜尋
     ph = "輸入代號 (2330)" if st.session_state['market_type'] == 'TW' else "輸入代號 (NVDA, TSLA)"
     st.text_input("🔍 搜尋", placeholder=ph, key="search_input_val", on_change=handle_search)
     
-    # AI 掃描
     with st.container(border=True):
         st.markdown(f"### 🤖 {st.session_state['market_type']} AI 掃描")
-        
         if st.session_state['market_type'] == 'TW':
             sel_group = st.selectbox("1️⃣ 範圍", st.session_state.get('all_groups_tw', ["全部"]))
         else:
-            sel_group = st.selectbox("1️⃣ 範圍", ["🔥 美股熱門百大"]) # 美股暫時鎖定熱門股
+            sel_group = st.selectbox("1️⃣ 範圍", ["🔥 美股熱門百大"])
 
         strat_map = {
             "🌅 明日之星潛力股": "tomorrow_star",
@@ -218,18 +205,18 @@ with st.sidebar:
     st.divider()
     if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.caption("Ver: 101.0 (全球雙核心版)")
+    st.caption("Ver: 102.0 (完整修復版)")
 
 # --- 主程式 ---
 mode = st.session_state['view_mode']
 m_type = st.session_state['market_type']
 
 if mode == 'welcome':
-    ui.render_header(f"👋 {m_type} 戰情室 V101")
+    ui.render_header(f"👋 {m_type} 戰情室 V102")
     if m_type == 'TW':
         st.info("🇹🇼 台股模式啟用。資料來源：TWSE / Yahoo Finance。")
     else:
-        st.success("🇺🇸 美股模式啟用。資料來源：Yahoo Finance (Realtime)。\n\n💡 試試輸入 **NVDA, TSLA, AAPL, MSTR** 進行深度 AI 診斷！")
+        st.success("🇺🇸 美股模式啟用。資料來源：Yahoo Finance (Realtime)。\n\n💡 試試輸入 **NVDA, TSLA, AAPL** 進行 AI 診斷！")
 
 elif mode == 'analysis':
     code = st.session_state['current_stock']
@@ -243,7 +230,7 @@ elif mode == 'analysis':
         if src == "fail":
             st.error(f"⚠️ 無法取得 {code} 資料。")
         else:
-            df, _, rt_pack = db.get_realtime_data(df, code) # V101 通用即時
+            df, _, rt_pack = db.get_realtime_data(df, code)
             
             curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]
             chg = curr - prev; pct = (chg/prev)*100
@@ -254,14 +241,11 @@ elif mode == 'analysis':
             va = df['Volume'].rolling(5).mean().iloc[-1]
             vs = "爆量" if vol > vy*1.5 else "量縮" if vol < vy*0.6 else "正常"
             
-            # 單位判斷
             unit = "股" if not code.isdigit() else "張"
             vol_disp = vol if unit == "股" else vol/1000
             
             info = stock.info.get('longBusinessSummary', '')
             ui.render_company_profile(db.translate_text(info))
-            
-            # 傳遞單位參數
             ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, "一般", vol_disp, vy, va, vs, 0, 0, None, None, rt_pack, unit=unit, code=code)
             ui.render_chart(df, f"{name} K線圖", db.get_color_settings(code))
             
@@ -279,23 +263,17 @@ elif mode == 'scan':
     display_list = st.session_state.get('scan_results', [])
     
     if not display_list:
-        # 選擇掃描池
         if m_type == 'TW':
             pool = st.session_state['scan_pool_tw']
-            if target != "🔍 全部上市櫃":
-                pool = [c for c in pool if c in twstock.codes and twstock.codes[c].group == target]
-        else:
-            pool = US_STOCK_POOL # 美股熱門池
+            if target != "🔍 全部上市櫃": pool = [c for c in pool if c in twstock.codes and twstock.codes[c].group == target]
+        else: pool = US_STOCK_POOL
         
         limit = st.session_state.get('scan_limit', 30)
-        bar = st.progress(0)
-        raw_results = []
-        count = 0
+        bar = st.progress(0); raw_results = []; count = 0
         
         for i, c in enumerate(pool):
             if count >= limit: break
             bar.progress(min((count+1)/limit, 1.0))
-            
             try:
                 _, _, df, src = db.get_stock_data(c)
                 if df is not None and len(df) > 30:
@@ -308,12 +286,9 @@ elif mode == 'scan':
                     vol_ma5 = df['Volume'].rolling(5).mean().iloc[-1]
                     ma5 = df['Close'].rolling(5).mean().iloc[-1]
                     
-                    valid = False
-                    info_txt = ""
-                    
+                    valid = False; info_txt = ""
                     if stype == 'tomorrow_star':
-                        if close > open_p and close > high * 0.985 and vol > vol_ma5 and close > ma5:
-                            valid = True; score += 10; info_txt = "尾盤強勢"
+                        if close > open_p and close > high * 0.985 and vol > vol_ma5 and close > ma5: valid = True; score += 10; info_txt = "尾盤強勢"
                     elif stype == 'super_win':
                         if score >= 60: valid = True; info_txt = f"趨勢強"
                     elif stype == 'day':
@@ -325,7 +300,7 @@ elif mode == 'scan':
                          if vol > thresh: valid = True; info_txt = "熱門"
                          
                     if valid:
-                        n = c # 美股暫用代號
+                        n = c
                         if m_type == 'TW' and c in twstock.codes: n = twstock.codes[c].name
                         raw_results.append({'c': c, 'n': n, 'p': close, 'info': info_txt, 'score': score, 'w_prob': w_prob, 'd': df, 'src': src})
                         count += 1
@@ -340,13 +315,7 @@ elif mode == 'scan':
     if display_list:
         st.success(f"已篩選出 {len(display_list)} 檔標的")
         for i, item in enumerate(display_list):
-            if ui.render_detailed_card(item['c'], item['n'], item['p'], item['d'], item['src'], 
-                                     key_prefix=f"scan_{stype}", rank=i+1, 
-                                     strategy_info=item['info'], score=item['score'], 
-                                     w_prob=item.get('w_prob', 50)): 
-                nav_to('analysis', item['c'], item['n'])
-                st.rerun()
-    else:
-        st.warning("無符合條件標的")
-
+            if ui.render_detailed_card(item['c'], item['n'], item['p'], item['d'], item['src'], key_prefix=f"scan_{stype}", rank=i+1, strategy_info=item['info'], score=item['score'], w_prob=item.get('w_prob', 50)): 
+                nav_to('analysis', item['c'], item['n']); st.rerun()
+    else: st.warning("無符合條件標的")
     ui.render_back_button(lambda: nav_to('welcome'))
