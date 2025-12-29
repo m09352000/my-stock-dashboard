@@ -1,9 +1,7 @@
 streamlit
-twstock
 pandas
 plotly
-Pillow
-pytesseract
-opencv-python-headless
-numpy
+twstock
 yfinance
+lxml
+requests
