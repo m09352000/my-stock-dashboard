@@ -1,12 +1,11 @@
 import pandas as pd
 import twstock
-import yfinance as yf # 新增這行
+import yfinance as yf
 import os
 import json
-import time
 from datetime import datetime
 
-# --- V92: 資料庫核心 (抗 Ban 穩定版) ---
+# --- V93: 資料庫核心 (暴力雙路徑版) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -21,7 +20,6 @@ def init_db():
                 users = json.load(f)
         except: users = {}
 
-    # 強制重置 admin，確保您能登入
     users["admin"] = {"password": "admin888", "name": "超級管理員"}
     
     with open(USERS_FILE, 'w', encoding='utf-8') as f:
@@ -78,64 +76,54 @@ def update_watchlist(username, code, action="add"):
         return True
     except: return False
 
-# --- 4. 股票數據 (V92 核心修正：改用 Yahoo Finance 抓歷史) ---
+# --- 4. 股票數據 (V93 核心修正：暴力試錯法) ---
 def get_stock_data(code):
     """
-    策略：
-    1. 透過 twstock 判斷上市(.TW) 或 上櫃(.TWO)
-    2. 使用 yfinance 下載歷史資料 (避開 TWSE IP Ban)
-    3. 回傳格式統一，讓 UI 端無縫接軌
+    不管 twstock 說什麼，直接用 yfinance 試 .TW 和 .TWO
     """
     try:
-        # 1. 判斷股票後綴 (Yahoo Finance 需要 .TW 或 .TWO)
-        suffix = ".TW" # 預設上市
-        stock_info = twstock.codes.get(code)
-        
-        if stock_info:
-            if stock_info.market == "上櫃":
-                suffix = ".TWO"
-        else:
-            # 若 twstock 查不到(如ETF)，嘗試猜測或預設
-            pass 
+        # 建立假的 Stock 物件結構，避免 UI 報錯
+        class FakeStockInfo:
+            def __init__(self, code, name):
+                self.info = {
+                    'name': name,
+                    'code': code,
+                    'sharesOutstanding': 0,
+                    'heldPercentInstitutions': 0,
+                    'longBusinessSummary': '資料由 Yahoo Finance 提供 (TWSE IP Bypass Mode)'
+                }
 
-        yf_ticker = f"{code}{suffix}"
-        
-        # 2. 使用 yfinance 下載資料 (速度快，不鎖 IP)
-        # 抓取 1 年份資料，間隔 1 天
-        df = yf.download(yf_ticker, period="1y", interval="1d", progress=False)
-        
-        if df.empty:
-            # 嘗試另一種後綴 (有時候 ETF 判斷會失準)
-            alt_suffix = ".TWO" if suffix == ".TW" else ".TW"
-            df = yf.download(f"{code}{alt_suffix}", period="1y", interval="1d", progress=False)
-            if df.empty:
-                return code, None, None, "fail"
-        
-        # 3. 格式清理 (yfinance 有時會有 MultiIndex)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-            
-        # 確保索引是 Datetime
-        df.index = pd.to_datetime(df.index)
-        
-        # 確保欄位名稱正確 (相容原本程式)
-        # yfinance 欄位通常是 Open, High, Low, Close, Volume
-        
-        # 模擬一個 twstock 物件回傳 (只為了取 info)
-        fake_stock_obj = type('obj', (object,), {'info': {}})
-        if stock_info:
-            fake_stock_obj.info = {
-                'name': stock_info.name,
-                'code': stock_info.code,
-                'sharesOutstanding': 0, # yfinance 免費版不易取得，設 0 避免錯誤
-                'heldPercentInstitutions': 0,
-                'longBusinessSummary': f"{stock_info.name} (資料來源: Yahoo Finance)"
-            }
-        
-        return f"{code}", fake_stock_obj, df, "yahoo"
+        # 嘗試取得名稱 (若 twstock 還活著)
+        name = code
+        try:
+            if code in twstock.codes:
+                name = twstock.codes[code].name
+        except: pass
+
+        fake_stock_obj = FakeStockInfo(code, name)
+
+        # 策略 A: 先試上市 (.TW)
+        try:
+            df = yf.download(f"{code}.TW", period="1y", interval="1d", progress=False)
+            if not df.empty and len(df) > 5:
+                # 清洗 MultiIndex
+                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+                return f"{code}", fake_stock_obj, df, "yahoo"
+        except: pass
+
+        # 策略 B: 若失敗，試上櫃 (.TWO)
+        try:
+            df = yf.download(f"{code}.TWO", period="1y", interval="1d", progress=False)
+            if not df.empty and len(df) > 5:
+                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+                return f"{code}", fake_stock_obj, df, "yahoo"
+        except: pass
+
+        # 都失敗
+        return code, None, None, "fail"
         
     except Exception as e:
-        print(f"Error fetching {code}: {e}")
+        print(f"Global Error fetching {code}: {e}")
         return code, None, None, "fail"
 
 def get_color_settings(code):
@@ -159,11 +147,7 @@ def save_comment(user, msg):
     if not os.path.exists(COMMENTS_FILE):
         df = pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
     else: df = pd.read_csv(COMMENTS_FILE)
-    
-    new_row = {
-        'User': user, 'Nickname': user, # 簡化
-        'Message': msg, 'Time': datetime.now().strftime("%Y-%m-%d %H:%M")
-    }
+    new_row = {'User': user, 'Nickname': user, 'Message': msg, 'Time': datetime.now().strftime("%Y-%m-%d %H:%M")}
     df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
     df.to_csv(COMMENTS_FILE, index=False)
 
