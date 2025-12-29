@@ -1,10 +1,8 @@
 streamlit
-yfinance
-pandas
 twstock
+pandas
 plotly
-deep-translator
-lxml
-ta
-pytesseract
 Pillow
+pytesseract
+opencv-python-headless
+numpy
