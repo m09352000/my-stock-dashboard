@@ -1,18 +1,19 @@
+# logic_database.py
+# 資料處理核心：負責抓取股票資料、使用者資料庫存取
+
 import pandas as pd
 import twstock
 import yfinance as yf
 import os
 import json
 import re
-from datetime import datetime, timedelta
-
-# --- V102: 資料庫核心 (台美雙核心版) ---
+from datetime import datetime
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
 COMMENTS_FILE = 'stock_comments.csv'
 
-# --- 1. 初始化資料庫 ---
+# --- 資料庫初始化 ---
 def init_db():
     users = {}
     if os.path.exists(USERS_FILE):
@@ -32,32 +33,7 @@ def init_db():
 
 init_db()
 
-# --- 2. 使用者系統 ---
-def login_user(username, password):
-    try:
-        with open(USERS_FILE, 'r', encoding='utf-8') as f: users = json.load(f)
-        if username in users:
-            if str(users[username]['password']) == str(password): return True, "登入成功"
-            else: return False, "密碼錯誤"
-        return False, "帳號不存在"
-    except Exception as e: return False, str(e)
-
-def register_user(username, password, nickname):
-    try:
-        with open(USERS_FILE, 'r', encoding='utf-8') as f: users = json.load(f)
-        if username in users: return False, "帳號已存在"
-        users[username] = {"password": password, "name": nickname}
-        with open(USERS_FILE, 'w', encoding='utf-8') as f: json.dump(users, f, ensure_ascii=False)
-        return True, "註冊成功"
-    except Exception as e: return False, str(e)
-
-def get_user_nickname(username):
-    try:
-        with open(USERS_FILE, 'r', encoding='utf-8') as f: users = json.load(f)
-        return users.get(username, {}).get('name', username)
-    except: return username
-
-# --- 3. 股票數據核心 (雙核心) ---
+# --- 股票資料獲取 (雙核心) ---
 def get_stock_data(code):
     try:
         code = str(code).upper().strip()
@@ -97,7 +73,6 @@ def get_realtime_data(df, code):
     try:
         code = str(code).upper().strip()
         is_tw = code.isdigit()
-        
         latest_price = 0; high = 0; low = 0; vol = 0
         
         if is_tw:
@@ -134,8 +109,9 @@ def _make_fake_rt(df):
     }
 
 def get_color_settings(code):
-    return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'}
+    return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'} # 統一紅漲綠跌
 
+# --- 輔助函式 ---
 def translate_text(text): return text
 def save_scan_results(stype, codes):
     with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
@@ -152,3 +128,18 @@ def save_comment(user, msg):
 def get_comments():
     if os.path.exists(COMMENTS_FILE): return pd.read_csv(COMMENTS_FILE)
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
+def solve_stock_id(val):
+    val = str(val).strip().upper()
+    if not val: return None, None
+    if val.isdigit() and len(val) == 4:
+        name = val
+        if val in twstock.codes: name = twstock.codes[val].name
+        return val, name
+    if re.match(r'^[A-Z]+$', val): return val, val 
+    for code, data in twstock.codes.items():
+        if data.type in ["股票", "ETF"]:
+            if val == data.name: return code, data.name
+    for code, data in twstock.codes.items():
+        if data.type in ["股票", "ETF"]:
+            if val in data.name: return code, data.name
+    return None, None
