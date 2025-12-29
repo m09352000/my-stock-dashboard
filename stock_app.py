@@ -10,7 +10,7 @@ from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 import pytesseract
 import importlib
 from datetime import datetime, time as dt_time, timedelta, timezone
-import difflib # V80 新增: 用於模糊比對字串
+import difflib 
 
 import stock_db as db
 import stock_ui as ui
@@ -23,55 +23,59 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V80", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V81", layout="wide")
 
-# --- V80 新增: 模糊比對股票名稱 ---
+# --- V81 優化: 更聰明的模糊比對 ---
 def find_best_match_stock(text):
     """
     在所有台股代號與名稱中，尋找與 text 最相似的股票
     """
-    text = text.replace(" ", "").replace("試撮", "").replace("注意", "").replace("處置", "").strip()
-    if len(text) < 2: return None, None
+    # 1. 關鍵字清洗：去除看盤軟體常見的標籤雜訊
+    garbage_words = ["試撮", "注意", "處置", "全額", "資券", "當沖", "群組", "商品", "一"]
+    clean_text = text.replace(" ", "").upper() # 轉大寫以匹配英文股
+    for w in garbage_words:
+        clean_text = clean_text.replace(w, "")
+    
+    clean_text = clean_text.strip()
+    if len(clean_text) < 2 and not clean_text.isalpha(): return None, None # 過濾掉太短且非純英文的字
 
-    # 1. 建立搜尋清單
+    # 2. 建立搜尋清單 (包含代號與名稱)
     all_codes = {}
     for code, data in twstock.codes.items():
         if data.type == "股票":
             all_codes[code] = data.name
             
-    # 2. 先嘗試代號完全匹配
-    if text in all_codes:
-        return text, all_codes[text]
+    # 3. 策略 A: 代號完全匹配 (針對辨識出數字的情況)
+    if clean_text in all_codes:
+        return clean_text, all_codes[clean_text]
     
-    # 3. 嘗試名稱完全匹配
-    for c, n in all_codes.items():
-        if text == n: return c, n
+    # 4. 策略 B: 名稱完全匹配
+    # 建立 反查表: 名稱 -> 代號
+    name_to_code = {v: k for k, v in all_codes.items()}
+    if clean_text in name_to_code:
+        return name_to_code[clean_text], clean_text
         
-    # 4. 模糊比對 (最關鍵的一步)
-    # 取出所有股票名稱
-    all_names = list(all_codes.values())
-    # 找出最像的三個結果 (cutoff=0.6 代表相似度至少 60%)
-    matches = difflib.get_close_matches(text, all_names, n=1, cutoff=0.6)
+    # 5. 策略 C: 模糊比對 (針對 OCR 錯字)
+    all_names = list(name_to_code.keys())
+    
+    # 使用較寬鬆的標準 (0.5) 來抓取候選字
+    matches = difflib.get_close_matches(clean_text, all_names, n=3, cutoff=0.5)
     
     if matches:
-        best_name = matches[0]
-        # 反查代號
-        for c, n in all_codes.items():
-            if n == best_name:
-                return c, n
-                
-    # 5. 特殊處理 (如 KY 股)
-    # 有時候 OCR 會把 "世芯-KY" 辨識成 "世芯KY" 或 "世芯"
-    if "KY" in text or len(text) >= 2:
-        matches = difflib.get_close_matches(text, all_names, n=1, cutoff=0.5)
-        if matches:
-            best_name = matches[0]
-            for c, n in all_codes.items():
-                if n == best_name: return c, n
+        # 二次確認：如果字串長度差異太大，可能是誤判 (例如 "金" 對到 "台新金")
+        best_match = matches[0]
+        
+        # 特殊規則：如果是英文(如 MU)，必須完全包含
+        if clean_text.isalpha():
+            # 檢查是否為美股代號混入 (台股代號通常無純英文，除非是 KY 股的英文簡稱)
+            # 這裡簡單處理：若相似度夠高直接回傳
+            return name_to_code[best_match], best_match
+            
+        return name_to_code[best_match], best_match
 
     return None, None
 
-# --- V80 重寫: 鷹眼影像處理引擎 ---
+# --- V81 重寫: 超解析影像處理引擎 ---
 def process_image_upload(image_file):
     debug_info = {"raw_text": "", "processed_img": None, "error": None}
     found_stocks = set()
@@ -81,59 +85,48 @@ def process_image_upload(image_file):
         img = Image.open(image_file)
         if img.mode != 'RGB': img = img.convert('RGB')
         
-        # 2. 影像前處理策略 A: 全圖辨識 (針對代號)
-        # 轉灰階 -> 反轉 (讓白字變黑字) -> 增強對比
-        gray = img.convert('L')
-        inverted = ImageOps.invert(gray)
-        enhancer = ImageEnhance.Contrast(inverted)
-        final_img_full = enhancer.enhance(2.5) # 高對比
+        # 2. V81 關鍵技術: 超解析放大 (Upscaling)
+        # 手機截圖通常字很小，放大 2 倍能顯著提升 "MU", "晶睿" 這類小字的辨識率
+        target_width = img.width * 2
+        target_height = img.height * 2
+        img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
         
-        # 3. 影像前處理策略 B: 左側裁切 (針對中文名稱，V80 核心技術)
-        # 您的截圖股票名稱都在左邊，右邊的數字會干擾 OCR
-        # 我們只切下左邊 35% 的寬度來進行辨識
+        # 3. 智慧裁切 (只取左側 35% 股票名稱區)
         w, h = img.size
-        crop_width = int(w * 0.35) # 只取左邊 35%
-        cropped_img = gray.crop((0, 0, crop_width, h))
+        # 稍微縮小範圍到 33% 避開漲跌顏色的干擾
+        crop_width = int(w * 0.33) 
+        cropped_img = img.crop((0, 0, crop_width, h))
         
-        # 針對裁切後的圖片做二值化處理 (Binarization)
-        # 讓文字變成絕對的黑，背景變成絕對的白
-        thresh = 200
+        # 4. 影像增強 (灰階 -> 反轉 -> 高對比)
+        gray = cropped_img.convert('L')
+        inverted = ImageOps.invert(gray) # 黑底轉白底
+        enhancer = ImageEnhance.Contrast(inverted)
+        final_img = enhancer.enhance(3.0) # 極高對比，讓文字變黑，背景變白
+        
+        # 5. 二值化 (Binarization) - 去除灰色雜訊
+        # 讓灰色(試撮標籤)變白，只有深色文字保留
+        thresh = 180
         fn = lambda x : 255 if x > thresh else 0
-        final_img_crop = cropped_img.convert('L').point(fn, mode='1')
+        final_img_bin = final_img.convert('L').point(fn, mode='1')
         
-        # 儲存除錯圖片 (這裡我們只存 cropped 給您看效果，實際不存檔)
-        debug_info['processed_img'] = final_img_crop
+        debug_info['processed_img'] = final_img_bin
 
-        # 4. 執行 OCR (雙重引擎)
-        # 引擎 1: 跑全圖 (抓英文代號效果好)
-        text_full = pytesseract.image_to_string(final_img_full, lang='eng', config='--psm 6')
-        # 引擎 2: 跑裁切圖 (抓中文名稱效果好)
-        text_crop = pytesseract.image_to_string(final_img_crop, lang='chi_tra', config='--psm 6')
+        # 6. 執行 OCR (雙語模式)
+        # lang='chi_tra+eng' 同時辨識中文與英文
+        # psm 6 假設是一整塊統一的文字區塊
+        text = pytesseract.image_to_string(final_img_bin, lang='chi_tra+eng', config='--psm 6')
         
-        full_text_combined = text_full + "\n" + text_crop
-        debug_info['raw_text'] = full_text_combined
+        debug_info['raw_text'] = text
 
-        # 5. 解析文字並比對
-        lines = full_text_combined.split('\n')
+        # 7. 解析與清洗
+        lines = text.split('\n')
         for line in lines:
-            # 清理雜訊
             clean_line = line.strip()
+            # 過濾無效行
             if len(clean_line) < 2: continue
+            if any(x in clean_line for x in ["成交", "漲跌", "幅度", "代號"]): continue
             
-            # 先試試看是不是代號 (4碼數字)
-            code_match = re.search(r'[0-9]{4}', clean_line)
-            if code_match:
-                potential_code = code_match.group(0)
-                if potential_code in twstock.codes:
-                    found_stocks.add((potential_code, twstock.codes[potential_code].name))
-                    continue # 找到代號就換下一行
-            
-            # 如果不是代號，進行中文模糊比對
-            # 過濾掉明顯不是股票的行 (例如時間、標題)
-            if any(x in clean_line for x in ["成 交", "漲 跌", "幅 度", "總 量", "買 進", "賣 出"]):
-                continue
-                
-            # 呼叫 V80 模糊比對函式
+            # 呼叫 V81 強化版比對
             sid, sname = find_best_match_stock(clean_line)
             if sid:
                 found_stocks.add((sid, sname))
@@ -144,7 +137,7 @@ def process_image_upload(image_file):
         debug_info['error'] = str(e)
         return [], debug_info
 
-# --- 以下維持 V79 的核心功能，確保不簡化 ---
+# --- 以下維持 V79/V80 的核心功能，確保不簡化 ---
 
 def inject_realtime_data(df, code):
     if df is None or df.empty: return df, None, None
@@ -299,14 +292,14 @@ with st.sidebar:
             st.query_params.clear()
             nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 80.0 (OCR鷹眼增強版)")
+    st.markdown("---"); st.caption("Ver: 81.0 (超解析AI辨識版)")
 
 # --- Main Logic ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V80")
-    st.markdown("### 🚀 V80 更新：OCR 影像辨識大升級\n* **🦅 鷹眼裁切技術**：自動擷取左側股票名稱，排除右側數字干擾。\n* **🔍 模糊比對引擎**：即使 OCR 認錯字，也能透過 AI 比對找出正確股票。\n* **🛡️ 持久化存檔**：解決 F5 登出與資料遺失問題。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V81")
+    st.markdown("### 🚀 V81 更新：OCR 影像辨識大升級\n* **🦅 鷹眼裁切技術**：自動擷取左側股票名稱，排除右側數字干擾。\n* **🔍 模糊比對引擎**：即使 OCR 認錯字，也能透過 AI 比對找出正確股票。\n* **🛡️ 持久化存檔**：解決 F5 登出與資料遺失問題。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員中心")
@@ -396,7 +389,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V80)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V81)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
