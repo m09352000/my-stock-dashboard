@@ -6,10 +6,11 @@ import re
 import shutil
 import subprocess
 import os
-from PIL import Image, ImageOps, ImageEnhance
+from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 import pytesseract
 import importlib
 from datetime import datetime, time as dt_time, timedelta, timezone
+import difflib # V80 新增: 用於模糊比對字串
 
 import stock_db as db
 import stock_ui as ui
@@ -22,21 +23,129 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V79", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V80", layout="wide")
 
-# --- V79: 自動登入檢查 ---
-def check_session():
-    # 檢查 URL 參數是否有 user (F5 刷新後會保留)
-    # Streamlit 1.30+ 使用 st.query_params
-    qp = st.query_params
-    if "user" in qp and not st.session_state.get('user_id'):
-        uid = qp["user"]
-        # 這裡可以加強安全性，例如檢查 token，目前簡易實作
-        st.session_state['user_id'] = uid
-        return True
-    return False
+# --- V80 新增: 模糊比對股票名稱 ---
+def find_best_match_stock(text):
+    """
+    在所有台股代號與名稱中，尋找與 text 最相似的股票
+    """
+    text = text.replace(" ", "").replace("試撮", "").replace("注意", "").replace("處置", "").strip()
+    if len(text) < 2: return None, None
 
-# --- 即時數據注入 (維持 V76) ---
+    # 1. 建立搜尋清單
+    all_codes = {}
+    for code, data in twstock.codes.items():
+        if data.type == "股票":
+            all_codes[code] = data.name
+            
+    # 2. 先嘗試代號完全匹配
+    if text in all_codes:
+        return text, all_codes[text]
+    
+    # 3. 嘗試名稱完全匹配
+    for c, n in all_codes.items():
+        if text == n: return c, n
+        
+    # 4. 模糊比對 (最關鍵的一步)
+    # 取出所有股票名稱
+    all_names = list(all_codes.values())
+    # 找出最像的三個結果 (cutoff=0.6 代表相似度至少 60%)
+    matches = difflib.get_close_matches(text, all_names, n=1, cutoff=0.6)
+    
+    if matches:
+        best_name = matches[0]
+        # 反查代號
+        for c, n in all_codes.items():
+            if n == best_name:
+                return c, n
+                
+    # 5. 特殊處理 (如 KY 股)
+    # 有時候 OCR 會把 "世芯-KY" 辨識成 "世芯KY" 或 "世芯"
+    if "KY" in text or len(text) >= 2:
+        matches = difflib.get_close_matches(text, all_names, n=1, cutoff=0.5)
+        if matches:
+            best_name = matches[0]
+            for c, n in all_codes.items():
+                if n == best_name: return c, n
+
+    return None, None
+
+# --- V80 重寫: 鷹眼影像處理引擎 ---
+def process_image_upload(image_file):
+    debug_info = {"raw_text": "", "processed_img": None, "error": None}
+    found_stocks = set()
+    
+    try:
+        # 1. 載入圖片
+        img = Image.open(image_file)
+        if img.mode != 'RGB': img = img.convert('RGB')
+        
+        # 2. 影像前處理策略 A: 全圖辨識 (針對代號)
+        # 轉灰階 -> 反轉 (讓白字變黑字) -> 增強對比
+        gray = img.convert('L')
+        inverted = ImageOps.invert(gray)
+        enhancer = ImageEnhance.Contrast(inverted)
+        final_img_full = enhancer.enhance(2.5) # 高對比
+        
+        # 3. 影像前處理策略 B: 左側裁切 (針對中文名稱，V80 核心技術)
+        # 您的截圖股票名稱都在左邊，右邊的數字會干擾 OCR
+        # 我們只切下左邊 35% 的寬度來進行辨識
+        w, h = img.size
+        crop_width = int(w * 0.35) # 只取左邊 35%
+        cropped_img = gray.crop((0, 0, crop_width, h))
+        
+        # 針對裁切後的圖片做二值化處理 (Binarization)
+        # 讓文字變成絕對的黑，背景變成絕對的白
+        thresh = 200
+        fn = lambda x : 255 if x > thresh else 0
+        final_img_crop = cropped_img.convert('L').point(fn, mode='1')
+        
+        # 儲存除錯圖片 (這裡我們只存 cropped 給您看效果，實際不存檔)
+        debug_info['processed_img'] = final_img_crop
+
+        # 4. 執行 OCR (雙重引擎)
+        # 引擎 1: 跑全圖 (抓英文代號效果好)
+        text_full = pytesseract.image_to_string(final_img_full, lang='eng', config='--psm 6')
+        # 引擎 2: 跑裁切圖 (抓中文名稱效果好)
+        text_crop = pytesseract.image_to_string(final_img_crop, lang='chi_tra', config='--psm 6')
+        
+        full_text_combined = text_full + "\n" + text_crop
+        debug_info['raw_text'] = full_text_combined
+
+        # 5. 解析文字並比對
+        lines = full_text_combined.split('\n')
+        for line in lines:
+            # 清理雜訊
+            clean_line = line.strip()
+            if len(clean_line) < 2: continue
+            
+            # 先試試看是不是代號 (4碼數字)
+            code_match = re.search(r'[0-9]{4}', clean_line)
+            if code_match:
+                potential_code = code_match.group(0)
+                if potential_code in twstock.codes:
+                    found_stocks.add((potential_code, twstock.codes[potential_code].name))
+                    continue # 找到代號就換下一行
+            
+            # 如果不是代號，進行中文模糊比對
+            # 過濾掉明顯不是股票的行 (例如時間、標題)
+            if any(x in clean_line for x in ["成 交", "漲 跌", "幅 度", "總 量", "買 進", "賣 出"]):
+                continue
+                
+            # 呼叫 V80 模糊比對函式
+            sid, sname = find_best_match_stock(clean_line)
+            if sid:
+                found_stocks.add((sid, sname))
+
+        return list(found_stocks), debug_info
+
+    except Exception as e:
+        debug_info['error'] = str(e)
+        return [], debug_info
+
+# --- 以下維持 V79 的核心功能，確保不簡化 ---
+
 def inject_realtime_data(df, code):
     if df is None or df.empty: return df, None, None
     try:
@@ -78,7 +187,14 @@ def check_market_hours():
     if start_time <= current_time <= end_time: return True, "市場開盤中"
     else: return False, f"非交易時間 ({now.strftime('%H:%M')})"
 
-# --- State 初始化 ---
+def check_session():
+    qp = st.query_params
+    if "user" in qp and not st.session_state.get('user_id'):
+        uid = qp["user"]
+        st.session_state['user_id'] = uid
+        return True
+    return False
+
 defaults = {
     'view_mode': 'welcome', 'user_id': None, 'page_stack': ['welcome'],
     'current_stock': "", 'current_name': "", 'scan_pool': [], 'filtered_pool': [],      
@@ -88,7 +204,6 @@ defaults = {
 for k, v in defaults.items():
     if k not in st.session_state: st.session_state[k] = v
 
-# 執行自動登入檢查
 check_session()
 
 if not st.session_state['scan_pool']:
@@ -114,9 +229,6 @@ def solve_stock_id(val):
 
 def is_ocr_ready(): return shutil.which('tesseract') is not None
 def check_language_pack(): return True 
-
-def process_image_upload(image_file):
-    return [], {"raw_text": "OCR Disabled in V79"}
 
 def nav_to(mode, code=None, name=None):
     if code:
@@ -181,22 +293,20 @@ with st.sidebar:
     if not uid:
         if st.button("🔐 登入/註冊"): nav_to('login'); st.rerun()
     else:
-        # V79: 登出時清除 query params
         if st.button("🚪 登出"): 
             st.session_state['user_id']=None
             st.session_state['watch_active']=False
-            st.query_params.clear() # 清除網址參數
+            st.query_params.clear()
             nav_to('welcome'); st.rerun()
-            
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 79.0 (F5不登出版)")
+    st.markdown("---"); st.caption("Ver: 80.0 (OCR鷹眼增強版)")
 
 # --- Main Logic ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V79")
-    st.markdown("### 🚀 V79 更新：F5 不登出 & 資料不消失\n* **🔄 自動登入**：刷新網頁後，系統會自動記住您的身分，不再被登出。\n* **💾 資料保存**：自選股與會員資料現在會寫入硬碟，伺服器重啟也不會遺失。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V80")
+    st.markdown("### 🚀 V80 更新：OCR 影像辨識大升級\n* **🦅 鷹眼裁切技術**：自動擷取左側股票名稱，排除右側數字干擾。\n* **🔍 模糊比對引擎**：即使 OCR 認錯字，也能透過 AI 比對找出正確股票。\n* **🛡️ 持久化存檔**：解決 F5 登出與資料遺失問題。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員中心")
@@ -207,7 +317,6 @@ elif mode == 'login':
             ok, res = db.login_user(u, p)
             if ok: 
                 st.session_state['user_id']=u
-                # V79: 設定 URL 參數以維持登入
                 st.query_params["user"] = u
                 st.success("登入成功"); time.sleep(0.5); nav_to('watch'); st.rerun()
             else: st.error(res)
@@ -223,7 +332,6 @@ elif mode == 'login':
             else: st.error(res)
     ui.render_back_button(go_back)
 
-# ... (watch, learn, chat, scan, analysis 區塊邏輯與 V78 完全相同，請直接使用 V78 的程式碼)
 elif mode == 'watch':
     ui.render_header("🔒 個人自選股")
     uid = st.session_state['user_id']
@@ -236,6 +344,33 @@ elif mode == 'watch':
             code, name = solve_stock_id(add_c)
             if code: db.update_watchlist(uid, code, "add"); st.toast(f"已加入: {name}", icon="✅"); time.sleep(0.5); st.rerun()
             else: st.error(f"找不到: {add_c}")
+
+        with st.expander("📸 截圖匯入 (OCR鷹眼版)", expanded=True): # 預設展開方便使用
+            if is_ocr_ready():
+                uploaded_file = st.file_uploader("上傳自選股截圖 (支援看盤軟體黑底圖)", type=['png', 'jpg', 'jpeg'])
+                if uploaded_file:
+                    with st.spinner("AI 正在進行影像分割與文字辨識..."): 
+                        found_list, debug_info = process_image_upload(uploaded_file)
+                    
+                    if found_list:
+                        new_stocks = [item for item in found_list if item[0] not in wl]
+                        st.success(f"✅ 成功辨識 {len(found_list)} 檔股票")
+                        
+                        # 顯示辨識結果預覽
+                        cols = st.columns(4)
+                        for i, (wc, wn) in enumerate(found_list):
+                            cols[i % 4].caption(f"{wc} {wn}")
+                            
+                        if new_stocks:
+                            if st.button(f"📥 將 {len(new_stocks)} 檔新股票加入清單"):
+                                for wc, wn in new_stocks: db.update_watchlist(uid, wc, "add")
+                                st.rerun()
+                        else: st.info("所有辨識出的股票都已經在您的清單中了。")
+                    else: 
+                        st.error("未能辨識有效股票，請嘗試裁切圖片保留股票名稱部分。")
+                        with st.expander("查看原始辨識文字"):
+                            st.text(debug_info['raw_text'])
+            else: st.error("❌ OCR 引擎未安裝")
 
         if wl:
             stock_data = []
@@ -261,7 +396,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V79)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V80)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
@@ -270,7 +405,6 @@ elif mode == 'watch':
                     full_id, _, d, src = db.get_stock_data(code)
                     n = twstock.codes[code].name if code in twstock.codes else code
                     if d is not None:
-                        # 注入即時資料
                         d_real, _, _ = inject_realtime_data(d, code)
                         curr = d_real['Close'].iloc[-1] if isinstance(d_real, pd.DataFrame) else d_real['Close']
                         if ui.render_detailed_card(code, n, curr, d_real, src, key_prefix="watch", strategy_info="自選觀察"): nav_to('analysis', code, n); st.rerun()
@@ -279,62 +413,45 @@ elif mode == 'watch':
 
 elif mode == 'analysis':
     code = st.session_state['current_stock']; name = st.session_state['current_name']
-    
-    # 建立主容器，所有內容都放在這裡
     main_placeholder = st.empty()
-    
-    # 1. 初始渲染 (第一次進來先跑一次)
     def render_content():
         with main_placeholder.container():
-            # Header 回傳是否開啟 Live
             is_live = ui.render_header(f"{name} {code}", show_monitor=True)
-            
             full_id, stock, df, src = db.get_stock_data(code)
-            
             if src == "fail": 
                 st.error("查無資料")
                 return False
             elif src == "yahoo":
-                # 注入即時資料
                 df, bid_ask, rt_pack = inject_realtime_data(df, code)
-                
                 info = stock.info
                 shares = info.get('sharesOutstanding', 0)
                 curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]; chg = curr - prev; pct = (chg/prev)*100
                 vt = df['Volume'].iloc[-1]
                 turnover = (vt / shares * 100) if shares > 0 else 0
-                
                 vy = df['Volume'].iloc[-2]; va = df['Volume'].tail(5).mean() + 1
                 high = df['High'].iloc[-1]; low = df['Low'].iloc[-1]; amp = ((high - low) / prev) * 100
                 mf = "主力進貨 🔴" if (chg>0 and vt>vy) else ("主力出貨 🟢" if (chg<0 and vt>vy) else "觀望")
                 vol_r = vt/va; vs = "爆量 🔥" if vol_r>1.5 else ("量縮 💤" if vol_r<0.6 else "正常")
                 fh = info.get('heldPercentInstitutions', 0)*100
                 color_settings = db.get_color_settings(code)
-
                 ui.render_company_profile(db.translate_text(info.get('longBusinessSummary','')))
                 ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vt, vy, va, vs, fh, turnover, bid_ask, color_settings, rt_pack)
                 ui.render_chart(df, f"{name} K線圖", color_settings)
-                
                 m5 = df['Close'].rolling(5).mean().iloc[-1]; m20 = df['Close'].rolling(20).mean().iloc[-1]; m60 = df['Close'].rolling(60).mean().iloc[-1]
                 delta = df['Close'].diff(); u = delta.copy(); d = delta.copy(); u[u<0]=0; d[d>0]=0
                 rs = u.rolling(14).mean() / d.abs().rolling(14).mean(); rsi = (100 - 100/(1+rs)).iloc[-1]
                 bias = ((curr-m60)/m60)*100
                 ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df)
-            
             ui.render_back_button(go_back)
             return is_live
-
-    # 執行第一次渲染，並取得是否開啟 Live 狀態
     is_live_mode = render_content()
-    
-    # 2. 如果 Live 開啟，進入無窮迴圈進行局部刷新
     if is_live_mode:
         while True:
-            time.sleep(1) # 等待 1 秒
+            time.sleep(1)
             still_live = render_content()
-            if not still_live:
-                break
+            if not still_live: break
 
+# (其他頁面維持 V78 的程式碼，請直接使用)
 elif mode == 'learn':
     ui.render_header("📖 股市新手村"); t1, t2, t3 = st.tabs(["策略說明", "名詞解釋", "🕯️ K線型態"])
     with t1: st.markdown(STRATEGY_DESC)
