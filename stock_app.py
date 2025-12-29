@@ -8,15 +8,15 @@ import subprocess
 import os
 from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 import pytesseract
-from pytesseract import Output # V86 新增: 用於獲取座標資訊
 import importlib
 from datetime import datetime, time as dt_time, timedelta, timezone
 import difflib 
-import numpy as np # V86 新增: 用於計算座標中位數
+import numpy as np
 
 import stock_db as db
 import stock_ui as ui
 
+# 載入知識庫
 try:
     import knowledge
     importlib.reload(knowledge)
@@ -24,35 +24,37 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V86", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V87", layout="wide")
 
-# --- V86: 終極字串比對與清洗 ---
-def clean_text_v86(text):
-    """V86 專用強力清洗：移除所有非股名元素"""
-    # 1. 移除常見雜訊詞
-    garbage = ["試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", "幅度", "代號", "買進", "賣出", "總量", "庫存", "損益", "現價", "成本"]
-    text_upper = text.upper()
-    for g in garbage:
-        text_upper = text_upper.replace(g, "")
-        
-    # 2. 移除所有數字和小數點 (V86: 這是關鍵，因為我們依賴座標過濾，殘留的數字一定是雜訊)
-    # 但要小心保留 ETF 名稱中的數字 (如 0050 的 50)，這在比對階段處理
-    # 這裡先移除像是價格的數字結構
-    text_cleaned = re.sub(r'\d+\.\d+', '', text_upper) # 移除小數點價格
+# --- V87: 嚴格字串清洗與比對 ---
+def find_best_match_stock_v87(text):
+    """
+    V87: 針對切除後的左側文字進行比對
+    """
+    # 1. 垃圾字過濾 (針對左側標籤)
+    garbage_words = [
+        "試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", 
+        "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存", "延遲", 
+        "放一", "一些", "一", "二", "三"
+    ]
     
-    # 3. 移除特殊符號，只保留中英數和連字號
-    text_cleaned = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9\-]', '', text_cleaned)
+    clean_text = text.replace(" ", "").upper()
+    for w in garbage_words:
+        clean_text = clean_text.replace(w, "")
     
-    return text_cleaned.strip()
+    # 2. 移除所有看似價格的數字 (例如 "123.45")
+    clean_text = re.sub(r'\d+\.\d+', '', clean_text)
+    
+    # 3. 移除括號與特殊符號
+    clean_text = re.sub(r'\(.*?\)', '', clean_text)
+    clean_text = re.sub(r'\[.*?\]', '', clean_text)
+    clean_text = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9\-]', '', clean_text).strip()
 
-def find_best_match_stock_v86(text):
-    """V86: 基於幾何過濾後的精準比對 (含ETF)"""
-    clean_input = clean_text_v86(text)
-    if len(clean_input) < 2: return None, None
-    # 如果清洗後只剩數字，且不是4碼，極大機率是殘留的價格或代號片段
-    if clean_input.isdigit() and len(clean_input) != 4: return None, None
+    if len(clean_text) < 2: return None, None
+    # 如果只剩下數字且不是4碼，視為雜訊 (例如殘留的股價整數位)
+    if clean_text.isdigit() and len(clean_text) != 4: return None, None
 
-    # 建立搜尋清單 (股票 + ETF)
+    # 4. 建立搜尋清單 (含ETF)
     all_codes = {}
     for code, data in twstock.codes.items():
         if data.type in ["股票", "ETF"]:
@@ -61,129 +63,96 @@ def find_best_match_stock_v86(text):
     name_to_code = {v: k for k, v in all_codes.items()}
     all_names = list(name_to_code.keys())
 
-    # 1. 精準匹配 (優先)
-    if clean_input in name_to_code: return name_to_code[clean_input], clean_input
-    if clean_input in all_codes: return clean_input, all_codes[clean_input]
+    # A. 完全匹配 (優先)
+    if clean_text in all_codes: return clean_text, all_codes[clean_text]
+    if clean_text in name_to_code: return name_to_code[clean_text], clean_text
 
-    # 2. 包含搜尋 (處理 OCR 黏字或漏字)
-    # 針對台新介面，有時 "華城" 會被讀成 "撮華城"，清洗後變 "華城"，已在上面擋掉
-    # 這裡處理像 "元大台灣50" 被讀成 "元大台灣" 的情況
+    # B. 包含搜尋 (嚴格長度限制)
     for name in all_names:
-        # 確保 input 夠長才做包含搜尋，避免 "金" 匹配所有金控
-        if len(clean_input) >= 2 and (clean_input in name):
-             # 字數差異懲罰：長度差太多視為誤判
-            if abs(len(name) - len(clean_input)) <= 2:
+        if name in clean_text or clean_text in name:
+            # 長度差異不能超過 2，避免 "金" 對到 "國泰金"
+            if abs(len(name) - len(clean_text)) <= 2: 
                 return name_to_code[name], name
-    
-    # 3. 高門檻模糊比對 (最後防線)
-    # 門檻設為 0.7，寧缺勿濫，避免幻覺
-    matches = difflib.get_close_matches(clean_input, all_names, n=1, cutoff=0.7)
+
+    # C. 模糊比對 (適度門檻)
+    matches = difflib.get_close_matches(clean_text, all_names, n=1, cutoff=0.6)
     if matches:
         best_match = matches[0]
-        if abs(len(best_match) - len(clean_input)) <= 2:
+        if abs(len(best_match) - len(clean_text)) <= 2:
             return name_to_code[best_match], best_match
 
     return None, None
 
-# --- V86 重寫: 幾何結構分析引擎 (The Geometric Engine) ---
+# --- V87 重寫: 區域鎖定與多重濾鏡引擎 ---
 def process_image_upload(image_file):
-    debug_info = {"raw_text": "V86 Geometric Analysis", "processed_img": None, "error": None}
+    debug_info = {"raw_text": "", "processed_img": None, "error": None}
     found_stocks = set()
+    full_ocr_text = ""
     
     try:
-        # 1. 影像前處理 (維持高解析與對比)
+        # 1. 載入圖片
         img = Image.open(image_file)
         if img.mode != 'RGB': img = img.convert('RGB')
         
-        # 3x 超解析放大
+        # 2. 3x 超解析放大
         target_width = img.width * 3
         target_height = img.height * 3
         img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        w, h = img.size
         
-        # 黑底轉白底 + 高對比增強
-        gray = img.convert('L')
-        inverted = ImageOps.invert(gray) 
-        enhancer = ImageEnhance.Contrast(inverted)
-        # V86: 使用稍微柔和一點的對比度，保留更多細節給幾何分析
-        high_contrast = enhancer.enhance(2.0)
+        # 3. V87 核心: 區域鎖定 (Zone Locking)
+        # 直接切出左邊 45% 的區域。
+        # 這樣做可以 100% 物理隔絕右邊股價造成的干擾 (例如把價格讀成代號)
+        # 左邊切掉 12% 避開標籤 (保留空間給長檔名)
+        zone_img = img.crop((int(w * 0.12), 0, int(w * 0.45), h))
         
-        # 二值化
-        thresh = 150
-        final_img = high_contrast.point(lambda x: 255 if x > thresh else 0, mode='1')
-        debug_info['processed_img'] = final_img
+        # 4. 多重濾鏡疊加 (Multi-Filter Stacking)
+        # 因為字體顏色不同 (紅/綠/黃/白)，單一處理容易漏字
+        # 我們準備三種不同處理方式的圖片
+        
+        images_to_process = []
+        
+        # [A] 原始增強灰階 (最通用，適合各種顏色)
+        gray = zone_img.convert('L')
+        enhancer = ImageEnhance.Contrast(gray)
+        img_contrast = enhancer.enhance(2.5)
+        images_to_process.append(img_contrast)
+        
+        # [B] 反轉白底黑字 (適合 Tesseract 識別)
+        img_inverted = ImageOps.invert(img_contrast)
+        images_to_process.append(img_inverted)
+        
+        # [C] 二值化 (針對高亮度文字，如黃色/白色)
+        thresh = 140
+        img_bin = img_contrast.point(lambda x: 255 if x > thresh else 0, mode='1')
+        images_to_process.append(img_bin)
+        
+        # 儲存其中一張給使用者預覽
+        debug_info['processed_img'] = img_inverted
 
-        # 2. V86 核心: 獲取詳細座標資料 (image_to_data)
-        # Output.DICT 會回傳一個字典，包含每個辨識出的字詞的 text, left, top, width, height 等資訊
-        data = pytesseract.image_to_data(final_img, lang='chi_tra+eng', output_type=Output.DICT)
-        
-        # 3. 幾何結構分析：尋找「股名縱貫線」
-        potential_stock_lefts = []
-        n_boxes = len(data['text'])
-        
-        # 初步篩選可能的股名候選字詞
-        for i in range(n_boxes):
-            text = data['text'][i].strip()
-            # 排除空白、純數字、純符號、過短的詞
-            if not text or text.isdigit() or len(text) < 2: continue
-            # 排除常見介面雜訊詞
-            if any(x in text for x in ["試撮", "注意", "商品", "成交", "漲跌"]): continue
-            
-            # 如果包含中文字或英文字母，視為潛在股名片段，記錄其左側座標 (X軸)
-            if re.search(r'[\u4e00-\u9fa5a-zA-Z]', text):
-                potential_stock_lefts.append(data['left'][i])
-                
-        if not potential_stock_lefts:
-            debug_info['error'] = "無法偵測到垂直排列的股票名稱結構"
-            return [], debug_info
+        # 5. 執行 OCR (對三張圖都跑)
+        # 使用 psm 6 (假設是單一文字塊)
+        for i, proc_img in enumerate(images_to_process):
+            # 混合模式 (中文+英文)
+            text = pytesseract.image_to_string(proc_img, lang='chi_tra+eng', config='--psm 6')
+            full_ocr_text += f"\n--- Filter {i} ---\n" + text
 
-        # 計算中位數，找出最可能的「股名起始 X 座標」
-        # 大部分的股名應該會對齊在某個 X 軸位置附近
-        median_left = np.median(potential_stock_lefts)
+        debug_info['raw_text'] = full_ocr_text
+
+        # 6. 解析
+        lines = full_ocr_text.split('\n')
+        seen_ids = set()
         
-        # 定義「股名廊道 (Corridor)」：中位數左右各延伸一定範圍
-        # 這個範圍內的文字被視為股名，範圍外的視為雜訊
-        corridor_margin = target_width * 0.05 # 容許誤差範圍 (例如總寬度的 5%)
-        x_min = median_left - corridor_margin
-        x_max = median_left + corridor_margin + (target_width * 0.1) # 右側稍微寬一點容納長股名
-        
-        # 4. 基於幾何位置的文字重建
-        # 根據 Y 軸 (top) 將文字分行
-        line_map = {} # 格式: {top_coord: [word1, word2, ...]}
-        
-        for i in range(n_boxes):
-            text = data['text'][i].strip()
-            left = data['left'][i]
-            top = data['top'][i]
-            height = data['height'][i]
+        for line in lines:
+            line = line.strip()
+            if len(line) < 2: continue
             
-            if not text: continue
+            # 使用 V87 嚴格比對
+            sid, sname = find_best_match_stock_v87(line)
             
-            # V86 關鍵判斷：只有落在「股名廊道」內的文字才保留
-            if x_min <= left <= x_max:
-                # 簡單的行對齊邏輯：將 Y 座標相近的視為同一行
-                found_line = False
-                for existing_top in line_map.keys():
-                    # 如果這兩個字的 Y 座標差異小於字高的一半，視為同一行
-                    if abs(top - existing_top) < (height * 0.5):
-                        line_map[existing_top].append(text)
-                        found_line = True
-                        break
-                if not found_line:
-                    line_map[top] = [text]
-                    
-        # 5. 將重建的行進行比對
-        reconstructed_lines = []
-        for top in sorted(line_map.keys()):
-            # 將同一行的字詞合併
-            line_text = "".join(line_map[top])
-            reconstructed_lines.append(line_text)
-            
-            # 呼叫 V86 比對函式
-            sid, sname = find_best_match_stock_v86(line_text)
-            if sid:
+            if sid and sid not in seen_ids:
                 found_stocks.add((sid, sname))
-
-        debug_info['raw_text'] = "\n".join(reconstructed_lines) # 顯示幾何重建後的文字
+                seen_ids.add(sid)
 
         return list(found_stocks), debug_info
 
@@ -191,7 +160,7 @@ def process_image_upload(image_file):
         debug_info['error'] = str(e)
         return [], debug_info
 
-# --- 以下維持核心功能 (不簡化) ---
+# --- 以下維持 V79~V86 核心功能 (不簡化) ---
 
 def inject_realtime_data(df, code):
     if df is None or df.empty: return df, None, None
@@ -255,7 +224,7 @@ check_session()
 
 if not st.session_state['scan_pool']:
     try:
-        all_codes = [c for c in twstock.codes.values() if c.type in ["股票", "ETF"]] # V86: 確保池子包含 ETF
+        all_codes = [c for c in twstock.codes.values() if c.type in ["股票", "ETF"]] # V87 保留 ETF
         st.session_state['scan_pool'] = sorted([c.code for c in all_codes])
         groups = sorted(list(set(c.group for c in all_codes if c.group)))
         st.session_state['all_groups'] = ["🔍 全部上市櫃"] + groups
@@ -265,7 +234,7 @@ if not st.session_state['scan_pool']:
 def solve_stock_id(val):
     val = str(val).strip()
     if not val: return None, None
-    clean_val = re.sub(r'[^\w\u4e00-\u9fff\-\.]', '', val) # V86: 允許 . (針對某些ETF代號)
+    clean_val = re.sub(r'[^\w\u4e00-\u9fff\-\.]', '', val)
     if clean_val in twstock.codes: return clean_val, twstock.codes[clean_val].name
     for c, d in twstock.codes.items():
         if d.type in ["股票", "ETF"] and d.name == clean_val: return c, d.name
@@ -346,14 +315,14 @@ with st.sidebar:
             st.query_params.clear()
             nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 86.0 (幾何結構分析終極版)")
+    st.markdown("---"); st.caption("Ver: 87.0 (區域鎖定版)")
 
 # --- Main Logic ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V86")
-    st.markdown("### 🚀 V86 終極更新：幾何結構分析引擎\n* **📐 幾何定位技術**：不再依賴固定裁切，AI 自動分析畫面結構，找出股名所在的「縱貫線」，適應不同券商介面。\n* **🎯 動態雜訊排除**：基於座標位置，自動忽略標籤與股價數字。\n* **🛡️ 嚴格雙重驗證**：結合幾何過濾與高門檻比對，徹底解決偵測錯誤與幻覺問題。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V87")
+    st.markdown("### 🚀 V87 更新：區域鎖定對焦引擎\n* **🔒 區域鎖定**：強制裁切畫面左側 45%，物理隔絕股價干擾，杜絕幻覺。\n* **🎞️ 多重濾鏡**：同時分析原圖、反轉、高亮三種版本，確保各色字體不漏接。\n* **🎯 嚴格比對**：保留 ETF 支援，並強化字串長度檢查。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員中心")
@@ -392,16 +361,16 @@ elif mode == 'watch':
             if code: db.update_watchlist(uid, code, "add"); st.toast(f"已加入: {name}", icon="✅"); time.sleep(0.5); st.rerun()
             else: st.error(f"找不到: {add_c}")
 
-        with st.expander("📸 截圖匯入 (V86 幾何分析版)", expanded=True):
+        with st.expander("📸 截圖匯入 (V87 區域鎖定版)", expanded=True):
             if is_ocr_ready():
                 uploaded_file = st.file_uploader("上傳自選股截圖 (支援各家券商黑底介面)", type=['png', 'jpg', 'jpeg'])
                 if uploaded_file:
-                    with st.spinner("AI 正在進行幾何結構分析與定位..."): 
+                    with st.spinner("AI 正在進行區域鎖定與多重濾鏡分析..."): 
                         found_list, debug_info = process_image_upload(uploaded_file)
                     
                     if found_list:
                         new_stocks = [item for item in found_list if item[0] not in wl]
-                        st.success(f"✅ 成功定位並辨識 {len(found_list)} 檔商品")
+                        st.success(f"✅ 成功辨識 {len(found_list)} 檔商品")
                         
                         cols = st.columns(4)
                         for i, (wc, wn) in enumerate(found_list):
@@ -413,16 +382,13 @@ elif mode == 'watch':
                                 st.rerun()
                         else: st.info("所有商品都已在清單中。")
                         
-                        with st.expander("👀 查看幾何重建結果"):
+                        with st.expander("👀 查看 AI 鎖定畫面"):
                             if debug_info['processed_img']:
-                                st.image(debug_info['processed_img'], caption="AI 分析用影像")
-                            st.text("--- 幾何重建後的文字序列 ---")
+                                st.image(debug_info['processed_img'], caption="左側 45% 鎖定區域")
+                            st.text("--- 辨識原始資料 ---")
                             st.text(debug_info['raw_text'])
                     else: 
-                        if debug_info['error']:
-                            st.error(f"分析失敗: {debug_info['error']}")
-                        else:
-                            st.error("未能辨識有效商品，請確認截圖清晰度。")
+                        st.error("未能辨識有效商品，請確認圖片清晰度。")
             else: st.error("❌ OCR 引擎未安裝")
 
         if wl:
@@ -449,7 +415,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V86)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V87)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
@@ -464,7 +430,6 @@ elif mode == 'watch':
         else: st.info("目前無自選股")
         ui.render_back_button(go_back)
 
-# (其他頁面 analysis, learn, chat, scan 皆維持原樣，不簡化)
 elif mode == 'analysis':
     code = st.session_state['current_stock']; name = st.session_state['current_name']
     main_placeholder = st.empty()
@@ -505,6 +470,7 @@ elif mode == 'analysis':
             still_live = render_content()
             if not still_live: break
 
+# (其他頁面維持不變，請直接使用)
 elif mode == 'learn':
     ui.render_header("📖 股市新手村"); t1, t2, t3 = st.tabs(["策略說明", "名詞解釋", "🕯️ K線型態"])
     with t1: st.markdown(STRATEGY_DESC)
