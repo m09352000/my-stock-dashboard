@@ -4,46 +4,65 @@ import os
 import json
 from datetime import datetime
 
-# --- V81: 資料庫核心 (修正 Admin 預設密碼) ---
+# --- V82: 資料庫核心 (強制重置 Admin 權限版) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
 COMMENTS_FILE = 'stock_comments.csv'
 
-# --- 1. 初始化資料庫 ---
+# --- 1. 初始化資料庫 (V82: 強制修復邏輯) ---
 def init_db():
-    # 若使用者檔案不存在，則建立預設 Admin
-    if not os.path.exists(USERS_FILE):
-        with open(USERS_FILE, 'w', encoding='utf-8') as f:
-            # V81 修正：預設密碼改為 admin888
-            default_data = {
-                "admin": {
-                    "password": "admin888", 
-                    "name": "超級管理員"
-                }
-            }
-            json.dump(default_data, f, ensure_ascii=False)
-            
+    # 1. 處理使用者資料庫
+    users = {}
+    
+    # 如果檔案存在，先讀取舊資料，以免覆蓋掉其他註冊的使用者
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, 'r', encoding='utf-8') as f:
+                users = json.load(f)
+        except:
+            users = {} # 如果檔案壞掉，就重來
+
+    # V82 關鍵修正：不管檔案在不在，強制將 admin 密碼重置為 admin888
+    # 這樣保證您更新程式碼後，一定能登入
+    users["admin"] = {
+        "password": "admin888", 
+        "name": "超級管理員"
+    }
+    
+    # 寫回檔案
+    with open(USERS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(users, f, ensure_ascii=False)
+
+    # 2. 處理自選股資料庫
     if not os.path.exists(WATCHLIST_FILE):
         with open(WATCHLIST_FILE, 'w', encoding='utf-8') as f:
             json.dump({}, f, ensure_ascii=False)
             
+    # 3. 處理留言板資料庫
     if not os.path.exists(COMMENTS_FILE):
         df = pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
         df.to_csv(COMMENTS_FILE, index=False)
 
-# 初始化
+# 程式啟動時立即執行初始化與修復
 init_db()
 
 # --- 2. 使用者系統 ---
 def login_user(username, password):
     try:
+        # 每次登入都重新讀取檔案，確保抓到最新的強制重置結果
         with open(USERS_FILE, 'r', encoding='utf-8') as f:
             users = json.load(f)
-        if username in users and users[username]['password'] == password:
-            return True, "登入成功"
-        return False, "帳號或密碼錯誤"
-    except: return False, "系統讀取錯誤"
+        
+        if username in users:
+            # 比對密碼
+            if str(users[username]['password']) == str(password):
+                return True, "登入成功"
+            else:
+                return False, "密碼錯誤"
+        return False, "帳號不存在"
+    except Exception as e: 
+        return False, f"系統錯誤: {str(e)}"
 
 def register_user(username, password, nickname):
     try:
@@ -90,17 +109,20 @@ def update_watchlist(username, code, action="add"):
         
         data[username] = user_list
         
+        # 立即寫入硬碟
         with open(WATCHLIST_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
         return True
     except: return False
 
-# --- 4. 股票數據 ---
+# --- 4. 股票數據 (快取與抓取) ---
 def get_stock_data(code):
     try:
         stock = twstock.Stock(code)
-        hist = stock.fetch_from(2023, 1)
-        if len(hist) > 60: hist = hist[-60:]
+        # 抓取近 60 日資料以確保技術指標準確
+        hist = stock.fetch_from(2023, 1) 
+        if len(hist) > 60:
+            hist = hist[-60:]
             
         data = {
             'Date': [d.date for d in hist],
@@ -112,6 +134,7 @@ def get_stock_data(code):
         }
         df = pd.DataFrame(data)
         df = df.fillna(method='ffill')
+        
         return f"{code}", stock, df, "yahoo"
     except:
         return code, None, None, "fail"
@@ -157,5 +180,8 @@ def get_comments():
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
 
 # --- 7. 其他 ---
-def update_top_100(): pass
-def translate_text(text): return text
+def update_top_100():
+    pass
+
+def translate_text(text):
+    return text
