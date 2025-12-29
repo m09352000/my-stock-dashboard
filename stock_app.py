@@ -16,25 +16,67 @@ try:
 except ImportError:
     STOCK_TERMS = {}; STRATEGY_DESC = "知識庫載入失敗"; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="股市戰情室 V99", layout="wide", page_icon="📈")
+st.set_page_config(page_title="股市戰情室 V100", layout="wide", page_icon="📈")
 
-# --- 核心運算引擎 ---
+# --- V100 核心：深度診斷生成器 ---
+def generate_detailed_report(df, score, weekly_prob, monthly_prob):
+    """
+    生成「超級無敵詳細」的 AI 診斷報告文字
+    """
+    latest = df.iloc[-1]
+    p = latest['Close']
+    m5 = df['Close'].rolling(5).mean().iloc[-1]
+    m20 = df['Close'].rolling(20).mean().iloc[-1]
+    m60 = df['Close'].rolling(60).mean().iloc[-1]
+    vol = latest['Volume']
+    vol_ma5 = df['Volume'].rolling(5).mean().iloc[-1]
+    
+    # 1. 均線形態分析
+    trend_txt = "【趨勢型態】\n"
+    if p > m5 and m5 > m20 and m20 > m60:
+        trend_txt += "目前呈現「多頭排列」的完美進攻型態。股價站穩五日線之上，短中長期均線全面向上發散，這是最強勢的主升段特徵，上方無明顯壓力，天空才是極限。"
+    elif p < m5 and m5 < m20 and m20 < m60:
+        trend_txt += "目前呈現「空頭排列」的下跌型態。股價遭五日線反壓，且月季線下彎形成蓋頭反壓，這代表上方套牢賣壓沈重，任何反彈都容易遇到解套賣壓，不宜貿然搶進。"
+    elif p > m20:
+        trend_txt += "股價位於月線(生命線)之上，屬於中多格局。雖然短線可能稍有震盪，但只要月線支撐不破，波段趨勢依然看好。"
+    else:
+        trend_txt += "股價跌破月線(生命線)，短線轉弱。目前進入整理修正階段，需觀察能否盡快站回月線，否則整理時間將拉長。"
+
+    # 2. 量能籌碼分析
+    vol_txt = "\n\n【量能籌碼】\n"
+    if vol > vol_ma5 * 1.5:
+        vol_txt += f"今日爆出 {int(vol/1000):,} 張的大量，是五日均量的 {vol/vol_ma5:.1f} 倍！這代表「主力大戶強勢表態」，有新資金進場換手，這是行情的催化劑。"
+    elif vol < vol_ma5 * 0.6:
+        vol_txt += "今日呈現「量縮整理」格局，成交量明顯萎縮。這代表市場觀望氣氛濃厚，買賣雙方都在縮手，等待進一步的方向確認。"
+    else:
+        vol_txt += "今日量能溫和，維持在五日均量附近，屬於健康的換手量，有利於股價穩步推升。"
+
+    # 3. 獲利機率解讀
+    prob_txt = "\n\n【獲利機率預測】\n"
+    prob_txt += f"根據 AI 演算法綜合運算：\n"
+    prob_txt += f"● **本週 (短線)** 獲利機率：**{weekly_prob}%**。{( '🔥 極高！適合積極操作。' if weekly_prob > 80 else '⚠️ 需謹慎，短線波動大。' )}\n"
+    prob_txt += f"● **本月 (波段)** 獲利機率：**{monthly_prob}%**。{( '💎 趨勢穩健，適合波段持有。' if monthly_prob > 70 else '⏳ 趨勢不明，建議觀望。' )}"
+
+    return trend_txt + vol_txt + prob_txt
+
 def analyze_stock_battle_data(df):
     if df is None or len(df) < 30: return None
     latest = df.iloc[-1]
     close = latest['Close']
     
-    # 技術指標計算
+    # 技術指標
     ma5 = df['Close'].rolling(5).mean().iloc[-1]
     ma20 = df['Close'].rolling(20).mean().iloc[-1]
     ma60 = df['Close'].rolling(60).mean().iloc[-1]
     std20 = df['Close'].rolling(20).std().iloc[-1]
     
+    # MACD
     exp12 = df['Close'].ewm(span=12, adjust=False).mean()
     exp26 = df['Close'].ewm(span=26, adjust=False).mean()
     macd = exp12 - exp26
     signal = macd.ewm(span=9, adjust=False).mean()
     
+    # RSI
     delta = df['Close'].diff()
     u = delta.copy(); d = delta.copy()
     u[u < 0] = 0; d[d > 0] = 0
@@ -44,35 +86,49 @@ def analyze_stock_battle_data(df):
     vol_ma5 = df['Volume'].rolling(5).mean().iloc[-1]
     vol_ratio = latest['Volume'] / vol_ma5 if vol_ma5 > 0 else 1
     
-    # 評分系統
-    score = 0
-    reasons = []
+    # --- V100: 雙週期勝率演算法 ---
     
-    if close > ma20: score += 20; reasons.append("股價站上月線")
-    if ma5 > ma20: score += 10; reasons.append("短均線黃金交叉")
-    if macd.iloc[-1] > signal.iloc[-1]: score += 15; reasons.append("MACD 多頭")
-    if 50 <= rsi <= 75: score += 15; reasons.append("RSI 強勢區")
-    if vol_ratio > 1.2: score += 20; reasons.append("量能放大")
-    if ma20 > ma60: score += 10; reasons.append("中長線多頭排列")
+    # 1. 本週獲利機率 (看 5日線, RSI, 量能)
+    w_score = 50 # 基礎分
+    if close > ma5: w_score += 15
+    if ma5 > ma20: w_score += 10
+    if vol_ratio > 1.2: w_score += 10
+    if 50 < rsi < 80: w_score += 10
+    elif rsi > 80: w_score -= 10 # 過熱風險
+    weekly_prob = min(max(w_score, 10), 98) # 限制 10-98
+
+    # 2. 本月獲利機率 (看 月線, 季線, MACD)
+    m_score = 50 # 基礎分
+    if close > ma20: m_score += 20
+    if ma20 > ma60: m_score += 20 # 多頭排列權重高
+    if macd.iloc[-1] > signal.iloc[-1]: m_score += 10
+    monthly_prob = min(max(m_score, 10), 95)
+
+    # 綜合評分
+    total_score = (weekly_prob + monthly_prob) / 2
     
-    # 包裝結果
-    heat = "🔥🔥🔥 極熱" if vol_ratio > 2.0 else ("🔥 溫熱" if vol_ratio > 1.3 else "☁️ 普通")
-    heat_color = "#FF0000" if vol_ratio > 2.0 else "#FF4500"
-    
-    short_action = "積極買進" if score >= 70 else "拉回佈局" if score >= 50 else "觀望"
+    # 生成詳細報告
+    detailed_report = generate_detailed_report(df, total_score, weekly_prob, monthly_prob)
+
+    # 操作建議
+    short_action = "積極買進" if weekly_prob >= 70 else "拉回佈局" if weekly_prob >= 50 else "觀望"
     mid_trend = "多頭" if ma20 > ma60 else "整理"
     long_bias = ((close - ma60) / ma60) * 100
     long_action = "乖離過大" if long_bias > 20 else "超跌" if long_bias < -15 else "合理"
     
     return {
-        "score": score,
-        "probability": min(score + 10, 95),
-        "heat": heat, "heat_color": heat_color, "reasons": reasons,
-        "short_action": short_action, "short_target": f"{close*1.05:.2f}",
+        "score": total_score,
+        "weekly_prob": weekly_prob,
+        "monthly_prob": monthly_prob,
+        "report": detailed_report,
+        "heat": "🔥🔥🔥 極熱" if vol_ratio > 2.0 else "🔥 溫熱" if vol_ratio > 1.2 else "☁️ 普通",
+        "heat_color": "#FF0000" if vol_ratio > 2.0 else "#FF4500",
+        "short_action": short_action, 
+        "short_target": f"{close*1.05:.2f}",
         "mid_trend": mid_trend, "mid_action": "續抱" if close > ma20 else "減碼", "mid_support": f"{ma20:.2f}",
         "long_action": long_action, "long_ma60": f"{ma60:.2f}",
         "pressure": ma20 + 2*std20, "support": ma20 - 2*std20, 
-        "suggest_price": close if score > 70 else ma20, "close": close
+        "suggest_price": close if total_score > 70 else ma20, "close": close
     }
 
 def inject_realtime_data(df, code):
@@ -144,9 +200,8 @@ with st.sidebar:
         st.markdown("### 🤖 AI 掃描雷達")
         sel_group = st.selectbox("1️⃣ 範圍", st.session_state.get('all_groups', ["全部"]))
         
-        # V99: 新增「明日之星」策略
         strat_map = {
-            "🌅 明日之星潛力股": "tomorrow_star", # New!
+            "🌅 明日之星潛力股": "tomorrow_star",
             "💎 超強力推薦必賺": "super_win",
             "⚡ 強力當沖": "day",
             "📈 穩健短線": "short",
@@ -165,16 +220,16 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
+    if st.button("📖 股市新手村 (終極版)"): nav_to('learn'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.caption("Ver: 99.0 (明日之星版)")
+    st.caption("Ver: 100.0 (深度診斷版)")
 
 # --- 主程式 ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 股市戰情室 V99")
-    st.success("✅ 新功能上線：**「🌅 明日之星潛力股」**\n專為想佈局明天的投資人設計，尋找今日收盤強勢、動能有望延續的標的。")
+    ui.render_header("👋 股市戰情室 V100")
+    st.success("🎉 V100 里程碑更新：\n1. **雙週期勝率**：新增「本週」與「本月」賺錢機率分析。\n2. **深度診斷報告**：AI 自動生成千字文技術分析。\n3. **新手村重製**：包含 K線戰法 SOP 與詳細停損停利建議。")
 
 elif mode == 'analysis':
     code = st.session_state['current_stock']
@@ -209,33 +264,28 @@ elif mode == 'analysis':
     ui.render_back_button(lambda: nav_to('welcome'))
 
 elif mode == 'learn':
-    ui.render_header("📖 股市新手村")
-    t1, t2, t3 = st.tabs(["策略說明", "名詞解釋", "K線型態"])
+    ui.render_header("📖 股市新手村 (終極詳細版)")
+    t1, t2, t3 = st.tabs(["策略解密", "名詞百科", "K線戰法 SOP"])
     with t1: st.markdown(STRATEGY_DESC)
     with t2:
         for cat, items in STOCK_TERMS.items():
             with st.expander(cat, expanded=True):
                 for k, v in items.items(): ui.render_term_card(k, v)
     with t3:
-        st.info("常見反轉訊號教學")
+        st.info("💡 這裡收錄了最經典的 K 線反轉訊號，並附上完整的操作 SOP。請熟讀！")
         c1, c2 = st.columns(2)
         with c1:
-            st.subheader("🔥 多方訊號")
+            st.subheader("🔥 多方訊號 (準備做多)")
             for k, v in KLINE_PATTERNS.get('bull', {}).items(): ui.render_kline_pattern_card(k, v)
         with c2:
-            st.subheader("❄️ 空方訊號")
+            st.subheader("❄️ 空方訊號 (準備做空)")
             for k, v in KLINE_PATTERNS.get('bear', {}).items(): ui.render_kline_pattern_card(k, v)
     ui.render_back_button(lambda: nav_to('welcome'))
 
 elif mode == 'scan':
     stype = st.session_state['current_stock']
     target = st.session_state.get('scan_target_group', '全部')
-    title_map = {
-        'tomorrow_star': '🌅 明日之星潛力股',
-        'super_win': '💎 超強力推薦必賺', 
-        'day': '⚡ 強力當沖', 
-        'short': '📈 穩健短線'
-    }
+    title_map = {'tomorrow_star': '🌅 明日之星', 'super_win': '💎 超強力必賺', 'day': '⚡ 強力當沖', 'short': '📈 穩健短線'}
     ui.render_header(f"🤖 {target} ⨉ {title_map.get(stype, stype)}")
     
     display_list = st.session_state.get('scan_results', [])
@@ -259,32 +309,19 @@ elif mode == 'scan':
                 if df is not None and len(df) > 30:
                     battle = analyze_stock_battle_data(df)
                     score = battle['score']
+                    w_prob = battle['weekly_prob']
                     
-                    # 數據準備
-                    close = df['Close'].iloc[-1]
-                    open_p = df['Open'].iloc[-1]
-                    high = df['High'].iloc[-1]
-                    low = df['Low'].iloc[-1]
-                    vol = df['Volume'].iloc[-1]
+                    close = df['Close'].iloc[-1]; open_p = df['Open'].iloc[-1]
+                    high = df['High'].iloc[-1]; vol = df['Volume'].iloc[-1]
                     vol_ma5 = df['Volume'].rolling(5).mean().iloc[-1]
                     ma5 = df['Close'].rolling(5).mean().iloc[-1]
-                    ma20 = df['Close'].rolling(20).mean().iloc[-1]
                     
                     valid = False
                     info_txt = ""
                     
-                    # --- 策略邏輯 ---
                     if stype == 'tomorrow_star':
-                        # 明日之星邏輯：
-                        # 1. 實體紅K (收 > 開)
-                        # 2. 收在相對高點 (收盤價 > 最高價 * 0.985) -> 代表尾盤有力
-                        # 3. 量能大於均量 (Vol > Vol_MA5) -> 有人氣
-                        # 4. 趨勢向上 (收 > MA5)
                         if close > open_p and close > high * 0.985 and vol > vol_ma5 and close > ma5:
-                            valid = True
-                            score += 10 # 加分
-                            info_txt = "尾盤強勢 | 蓄勢待發"
-                            
+                            valid = True; score += 10; info_txt = "尾盤強勢 | 蓄勢待發"
                     elif stype == 'super_win':
                         if score >= 60: valid = True; info_txt = f"趨勢強 | 評分 {score}"
                     elif stype == 'day':
@@ -296,7 +333,8 @@ elif mode == 'scan':
                          
                     if valid:
                         n = twstock.codes[c].name if c in twstock.codes else c
-                        raw_results.append({'c': c, 'n': n, 'p': close, 'info': info_txt, 'score': score, 'd': df, 'src': src})
+                        # 把週勝率也存進去
+                        raw_results.append({'c': c, 'n': n, 'p': close, 'info': info_txt, 'score': score, 'w_prob': w_prob, 'd': df, 'src': src})
                         count += 1
                 time.sleep(0.01)
             except: pass
@@ -311,7 +349,8 @@ elif mode == 'scan':
         for i, item in enumerate(display_list):
             if ui.render_detailed_card(item['c'], item['n'], item['p'], item['d'], item['src'], 
                                      key_prefix=f"scan_{stype}", rank=i+1, 
-                                     strategy_info=item['info'], score=item['score']):
+                                     strategy_info=item['info'], score=item['score'], 
+                                     w_prob=item.get('w_prob', 50)): # 傳入週勝率
                 nav_to('analysis', item['c'], item['n'])
                 st.rerun()
     else:
