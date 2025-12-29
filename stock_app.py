@@ -11,15 +11,14 @@ import pytesseract
 import importlib
 from datetime import datetime, time as dt_time, timedelta, timezone
 import difflib 
-import numpy as np
 
-# V89: 安全引入 OpenCV，避免環境錯誤導致當機
+# --- V90: 安全引入機制 (防爆核心) ---
 try:
     import cv2
+    import numpy as np
     OPENCV_AVAILABLE = True
 except ImportError:
     OPENCV_AVAILABLE = False
-    # st.warning("OpenCV 未安裝，將使用基礎影像處理模式。") # 可選提示
 
 import stock_db as db
 import stock_ui as ui
@@ -32,21 +31,71 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V89", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V90", layout="wide")
 
-# --- V89: 混合式影像處理引擎 (OpenCV + PIL) ---
+# --- 通用字串比對函式 ---
+def find_best_match_stock_v90(text):
+    # 1. 垃圾字過濾
+    garbage = [
+        "試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", 
+        "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存", "延遲", 
+        "放一", "一些", "一", "二", "三", "R", "G", "B"
+    ]
+    
+    clean_text = text.upper()
+    for w in garbage:
+        clean_text = clean_text.replace(w, "")
+    
+    # 移除干擾數字
+    clean_text = re.sub(r'\d+\.\d+', '', clean_text) # 移除股價
+    if not (clean_text.isdigit() and len(clean_text) == 4): # 如果不是4碼代號，移除數字
+        clean_text = re.sub(r'\d+', '', clean_text)
+    
+    clean_text = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9\-]', '', clean_text).strip()
+
+    if len(clean_text) < 2: return None, None
+
+    # 建立索引
+    all_codes = {}
+    for code, data in twstock.codes.items():
+        if data.type in ["股票", "ETF"]:
+            all_codes[code] = data.name
+    
+    name_to_code = {v: k for k, v in all_codes.items()}
+    all_names = list(name_to_code.keys())
+
+    # 比對邏輯
+    if clean_text in name_to_code: return name_to_code[clean_text], clean_text
+    
+    # 包含搜尋
+    for name in all_names:
+        name_no_digit = re.sub(r'\d+', '', name)
+        if len(clean_text) >= 2 and (clean_text in name_no_digit or name_no_digit in clean_text):
+            if abs(len(name_no_digit) - len(clean_text)) <= 1:
+                return name_to_code[name], name
+
+    # 模糊比對
+    matches = difflib.get_close_matches(clean_text, all_names, n=1, cutoff=0.6)
+    if matches:
+        best = matches[0]
+        if abs(len(best) - len(clean_text)) <= 2:
+            return name_to_code[best], best
+
+    return None, None
+
+# --- V90: 雙模式影像處理引擎 ---
 def process_image_upload(image_file):
     debug_info = {"raw_text": "", "processed_img": None, "error": None}
     found_stocks = set()
     full_ocr_log = ""
     
     try:
-        # 1. 讀取圖片
+        # 重置檔案指標
         image_file.seek(0)
-        file_bytes = np.asarray(bytearray(image_file.read()), dtype=np.uint8)
         
-        # 嘗試使用 OpenCV (V86/V89 高階模式)
+        # 模式 A: 鷹眼模式 (OpenCV)
         if OPENCV_AVAILABLE:
+            file_bytes = np.asarray(bytearray(image_file.read()), dtype=np.uint8)
             img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
             
             # 3x 放大
@@ -55,116 +104,72 @@ def process_image_upload(image_file):
             height = int(img.shape[0] * scale_percent / 100)
             img = cv2.resize(img, (width, height), interpolation=cv2.INTER_CUBIC)
             
-            # 色彩分離 (過濾非文字顏色)
+            # 色彩分離
             hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            # 保留亮度 > 80 的像素 (過濾黑色背景)
             mask = cv2.inRange(hsv, np.array([0, 0, 80]), np.array([180, 255, 255]))
             
-            # 膨脹修復 (連接斷字)
+            # 膨脹修復
             kernel = np.ones((2,2), np.uint8)
             mask = cv2.dilate(mask, kernel, iterations=1)
             
-            # 反轉為白底黑字
+            # 反轉
             result = cv2.bitwise_not(mask)
-            
-            # 轉回 PIL 格式供 OCR 使用
             img_pil = Image.fromarray(result)
             
-            # 準備多種裁切視窗 (左側 13% ~ 40%/50%/60%)
+            # 動態裁切
             w, h = img_pil.size
             crops = [
-                img_pil.crop((int(w*0.13), 0, int(w*0.45), h)), # 標準
-                img_pil.crop((int(w*0.13), 0, int(w*0.55), h)), # 寬版
+                img_pil.crop((int(w*0.13), 0, int(w*0.45), h)), # 窄
+                img_pil.crop((int(w*0.13), 0, int(w*0.55), h)), # 寬
             ]
+            debug_mode = "OpenCV 鷹眼模式"
             
         else:
-            # 回退模式 (PIL 基礎模式)
+            # 模式 B: 安全模式 (PIL) - 當 OpenCV 缺失時自動啟動
             img_pil = Image.open(image_file)
-            img_pil = img_pil.convert('RGB')
+            if img_pil.mode != 'RGB': img_pil = img_pil.convert('RGB')
+            
+            # 3x 放大
             w, h = img_pil.size
             img_pil = img_pil.resize((w*3, h*3), Image.Resampling.LANCZOS)
             
-            # 基礎裁切
-            crops = [img_pil.crop((int(w*0.13*3), 0, int(w*0.50*3), h*3))]
-
-        # 2. 執行 OCR (V88 多重引擎策略)
-        psm_modes = [6, 4] # 6=區塊, 4=單欄
-        
-        for crop in crops:
-            # 轉灰階並增強對比
-            if crop.mode != 'L': crop = crop.convert('L')
-            enhancer = ImageEnhance.Contrast(crop)
-            crop = enhancer.enhance(2.0)
+            # 基礎裁切與增強
+            crop_std = img_pil.crop((int(w*3*0.13), 0, int(w*3*0.55), h*3))
+            gray = crop_std.convert('L')
+            inverted = ImageOps.invert(gray)
+            enhancer = ImageEnhance.Contrast(inverted)
+            img_pil = enhancer.enhance(2.5) # 高反差
             
+            crops = [img_pil]
+            debug_mode = "PIL 安全模式 (未偵測到 OpenCV)"
+
+        # 執行 OCR
+        debug_info['processed_img'] = crops[0]
+        full_ocr_log += f"[{debug_mode}]\n"
+        
+        # 多重 PSM 掃描
+        psm_modes = [6, 4] 
+        for crop in crops:
             for psm in psm_modes:
                 text = pytesseract.image_to_string(crop, lang='chi_tra+eng', config=f'--psm {psm}')
-                full_ocr_log += f"\n--- OCR PSM {psm} ---\n{text}"
+                full_ocr_log += f"\n--- PSM {psm} ---\n{text}"
                 
                 # 解析
                 lines = text.split('\n')
                 for line in lines:
                     line = line.strip()
                     if len(line) < 2: continue
-                    
-                    # 呼叫 V89 比對 (整合了 ETF 邏輯)
-                    sid, sname = find_best_match_stock_v89(line)
+                    sid, sname = find_best_match_stock_v90(line)
                     if sid: found_stocks.add((sid, sname))
 
         debug_info['raw_text'] = full_ocr_log
-        if crops: debug_info['processed_img'] = crops[0] # 預覽第一張裁切
-        
         return list(found_stocks), debug_info
 
     except Exception as e:
         debug_info['error'] = str(e)
         return [], debug_info
 
-# --- V89: 字串比對 (包含 ETF 邏輯) ---
-def find_best_match_stock_v89(text):
-    # 清洗雜訊
-    garbage = ["試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", "幅度", "代號", "買進", "賣出", "一", "二", "三"]
-    clean_text = text.upper()
-    for w in garbage: clean_text = clean_text.replace(w, "")
-    
-    # 移除股價 (保留代號與 ETF 數字)
-    # 邏輯：移除 "123.45" 或 "1,000" 這種格式
-    clean_text = re.sub(r'\d+\.\d+', '', clean_text)
-    clean_text = re.sub(r'\d+,\d+', '', clean_text)
-    
-    # 移除特殊符號
-    clean_text = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9\-]', '', clean_text).strip()
-    
-    if len(clean_text) < 2: return None, None
-
-    # 建立索引
-    all_codes = {}
-    for code, data in twstock.codes.items():
-        if data.type in ["股票", "ETF"]:
-            all_codes[code] = data.name
-            
-    name_to_code = {v: k for k, v in all_codes.items()}
-    all_names = list(name_to_code.keys())
-
-    # 1. 完全匹配
-    if clean_text in all_codes: return clean_text, all_codes[clean_text]
-    if clean_text in name_to_code: return name_to_code[clean_text], clean_text
-    
-    # 2. 包含搜尋 (針對 ETF "元大台灣50" 被讀成 "元大台灣")
-    for name in all_names:
-        if name in clean_text or clean_text in name:
-            if abs(len(name) - len(clean_text)) <= 2:
-                return name_to_code[name], name
-                
-    # 3. 模糊比對
-    matches = difflib.get_close_matches(clean_text, all_names, n=1, cutoff=0.6)
-    if matches:
-        best = matches[0]
-        if abs(len(best) - len(clean_text)) <= 2:
-            return name_to_code[best], best
-            
-    return None, None
-
-# --- 以下維持核心功能 ---
+# --- 以下維持 V79~V88 核心功能 ---
 
 def inject_realtime_data(df, code):
     if df is None or df.empty: return df, None, None
@@ -308,14 +313,14 @@ with st.sidebar:
             st.query_params.clear()
             nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 89.0 (環境兼容版)")
+    st.markdown("---"); st.caption("Ver: 90.0 (防爆・自動降級雙引擎版)")
 
 # --- Main Logic ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V89")
-    st.markdown("### 🚀 V89 更新：環境兼容與修復\n* **🛠️ OpenCV 安全降級**：自動偵測環境，若缺少套件自動切換為備用引擎，防止當機。\n* **🌈 完整 ETF 支援**：整合 V85 以來的強大資料庫與比對邏輯。\n* **🛡️ 依賴性修復**：請務必更新 `requirements.txt`。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V90")
+    st.markdown("### 🚀 V90 更新：防爆雙引擎\n* **🛡️ 自動降級**：偵測不到 OpenCV 時自動切換至安全模式，絕不當機。\n* **🦅 鷹眼保留**：若環境正確，依然提供 V88 的強大矩陣辨識能力。\n* **💡 溫馨提示**：請檢查 `requirements.txt` 以解鎖完整功能。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員中心")
@@ -354,13 +359,16 @@ elif mode == 'watch':
             if code: db.update_watchlist(uid, code, "add"); st.toast(f"已加入: {name}", icon="✅"); time.sleep(0.5); st.rerun()
             else: st.error(f"找不到: {add_c}")
 
-        with st.expander("📸 截圖匯入 (V89 混合引擎版)", expanded=True):
+        with st.expander("📸 截圖匯入 (V90 防爆版)", expanded=True):
             if is_ocr_ready():
                 uploaded_file = st.file_uploader("上傳自選股截圖 (支援各家券商黑底介面)", type=['png', 'jpg', 'jpeg'])
                 if uploaded_file:
-                    with st.spinner("AI 正在使用混合引擎 (OpenCV + PIL) 進行分析..."): 
+                    with st.spinner("AI 正在分析截圖..."): 
                         found_list, debug_info = process_image_upload(uploaded_file)
                     
+                    if not OPENCV_AVAILABLE:
+                        st.warning("⚠️ 系統未偵測到 OpenCV，目前以【安全模式】運作，辨識率可能較低。請聯繫管理員更新 `requirements.txt`。")
+
                     if found_list:
                         new_stocks = [item for item in found_list if item[0] not in wl]
                         st.success(f"✅ 成功辨識 {len(found_list)} 檔商品")
@@ -375,10 +383,10 @@ elif mode == 'watch':
                                 st.rerun()
                         else: st.info("所有商品都已在清單中。")
                         
-                        with st.expander("👀 查看處理細節"):
+                        with st.expander("👀 查看 AI 處理畫面"):
                             if debug_info['processed_img']:
-                                st.image(debug_info['processed_img'], caption="影像增強結果")
-                            st.text("--- 辨識原始資料 ---")
+                                st.image(debug_info['processed_img'], caption="AI 處理結果")
+                            st.text("--- OCR 原始輸出 ---")
                             st.text(debug_info['raw_text'])
                     else: 
                         if debug_info['error']: st.error(f"分析錯誤: {debug_info['error']}")
@@ -409,7 +417,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V89)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V90)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
@@ -424,6 +432,7 @@ elif mode == 'watch':
         else: st.info("目前無自選股")
         ui.render_back_button(go_back)
 
+# (Analysis, learn, chat, scan 等區塊維持 V78 的程式碼，請直接使用 V78 的程式碼)
 elif mode == 'analysis':
     code = st.session_state['current_stock']; name = st.session_state['current_name']
     main_placeholder = st.empty()
