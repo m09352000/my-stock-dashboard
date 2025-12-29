@@ -4,19 +4,25 @@ import os
 import json
 from datetime import datetime
 
-# --- V79: JSON 持久化資料庫系統 ---
-# 確保資料寫入硬碟，重整網頁也不會消失
+# --- V81: 資料庫核心 (修正 Admin 預設密碼) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
 COMMENTS_FILE = 'stock_comments.csv'
 
-# --- 1. 初始化資料庫 (若檔案不存在則建立) ---
+# --- 1. 初始化資料庫 ---
 def init_db():
+    # 若使用者檔案不存在，則建立預設 Admin
     if not os.path.exists(USERS_FILE):
-        # 預設建立一個 admin 帳號
         with open(USERS_FILE, 'w', encoding='utf-8') as f:
-            json.dump({"admin": {"password": "123", "name": "管理員"}}, f, ensure_ascii=False)
+            # V81 修正：預設密碼改為 admin888
+            default_data = {
+                "admin": {
+                    "password": "admin888", 
+                    "name": "超級管理員"
+                }
+            }
+            json.dump(default_data, f, ensure_ascii=False)
             
     if not os.path.exists(WATCHLIST_FILE):
         with open(WATCHLIST_FILE, 'w', encoding='utf-8') as f:
@@ -37,7 +43,7 @@ def login_user(username, password):
         if username in users and users[username]['password'] == password:
             return True, "登入成功"
         return False, "帳號或密碼錯誤"
-    except: return False, "系統錯誤"
+    except: return False, "系統讀取錯誤"
 
 def register_user(username, password, nickname):
     try:
@@ -84,21 +90,17 @@ def update_watchlist(username, code, action="add"):
         
         data[username] = user_list
         
-        # 立即寫入硬碟
         with open(WATCHLIST_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
         return True
     except: return False
 
-# --- 4. 股票數據 (快取與抓取) ---
+# --- 4. 股票數據 ---
 def get_stock_data(code):
     try:
         stock = twstock.Stock(code)
-        # 抓取近 60 日資料以確保技術指標準確
-        hist = stock.fetch_from(2023, 1) # 簡單抓取，實際應用可優化日期
-        # 為了效能，我們只取最近 60 筆
-        if len(hist) > 60:
-            hist = hist[-60:]
+        hist = stock.fetch_from(2023, 1)
+        if len(hist) > 60: hist = hist[-60:]
             
         data = {
             'Date': [d.date for d in hist],
@@ -109,20 +111,17 @@ def get_stock_data(code):
             'Volume': [d.capacity for d in hist]
         }
         df = pd.DataFrame(data)
-        
-        # 處理無成交量的 NaN
         df = df.fillna(method='ffill')
-        
-        return f"{code}", stock, df, "yahoo" # 這裡模擬 yahoo 格式回傳
+        return f"{code}", stock, df, "yahoo"
     except:
         return code, None, None, "fail"
 
 def get_color_settings(code):
     return {'up': 'red', 'down': 'green', 'delta': 'inverse'}
 
-# --- 5. 掃描與歷史紀錄 (簡易實作) ---
+# --- 5. 掃描與歷史紀錄 ---
 def add_history(user, text):
-    pass # 實作略，可擴充寫入 log 檔
+    pass 
 
 def save_scan_results(stype, codes):
     filename = f"scan_{stype}.json"
@@ -157,10 +156,6 @@ def get_comments():
         return pd.read_csv(COMMENTS_FILE)
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
 
-# --- 7. 更新精選池 (模擬) ---
-def update_top_100():
-    pass
-
-# --- 8. 翻譯功能 (模擬) ---
-def translate_text(text):
-    return text # 實際可接 Google Translate API
+# --- 7. 其他 ---
+def update_top_100(): pass
+def translate_text(text): return text
