@@ -4,7 +4,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 
-# --- CSS: V102 UI (完整樣式表) ---
+# --- CSS: V103 UI ---
 def inject_custom_css():
     st.markdown("""
         <style>
@@ -25,7 +25,6 @@ def inject_custom_css():
         </style>
     """, unsafe_allow_html=True)
 
-# --- 1. 標題 ---
 def render_header(title, show_monitor=False):
     inject_custom_css()
     c1, c2 = st.columns([3, 1])
@@ -40,17 +39,14 @@ def render_header(title, show_monitor=False):
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
     return is_live
 
-# --- 2. 返回 ---
 def render_back_button(callback_func):
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
     if st.button("⬅️ 返回搜尋 / 列表", use_container_width=True): callback_func()
 
-# --- 3. 新手村卡片 ---
 def render_term_card(title, content):
     with st.container(border=True):
         st.subheader(f"📌 {title}"); st.markdown(content)
 
-# --- 4. K線戰法卡片 ---
 def render_kline_pattern_card(title, pattern_data):
     morph = pattern_data.get('morphology', '')
     psycho = pattern_data.get('psychology', '')
@@ -71,28 +67,20 @@ def render_kline_pattern_card(title, pattern_data):
             st.markdown(f"**【市場心理】**\n{psycho}")
             st.markdown(f"**【操作 SOP】**\n👉 {action}")
 
-# --- 5. 公司簡介 ---
 def render_company_profile(summary):
     if summary:
         with st.expander("🏢 公司簡介", expanded=False): st.write(summary)
 
-# --- 6. 儀表板 (支援美股單位) ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs, fh, tr, ba, cs, rt, unit="張", code=""):
     with st.container():
         c1, c2, c3, c4 = st.columns(4)
-        
-        # 漲跌顏色統一：紅漲綠跌
         val_color = "#FF2B2B" if chg > 0 else "#00E050" if chg < 0 else "white"
-        
         c1.markdown(f"<div style='font-size:0.9rem; color:#aaa'>成交價</div><div style='font-size:2rem; font-weight:bold; color:{val_color}'>{curr:.2f} <span style='font-size:1rem'>({pct:+.2f}%)</span></div>", unsafe_allow_html=True)
         c2.metric("最高", f"{high:.2f}")
         c3.metric("最低", f"{low:.2f}")
         
-        # 智能成交量顯示
         vol_str = f"{int(vol):,}"
-        if unit == "股" and vol > 1000000: # 美股顯示 M
-            vol_str = f"{vol/1000000:.2f}M"
-            
+        if unit == "股" and vol > 1000000: vol_str = f"{vol/1000000:.2f}M"
         c4.metric("成交量", f"{vol_str} {unit}")
         
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
@@ -100,27 +88,18 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs
         d1.metric("振幅", f"{amp:.2f}%")
         d2.metric("量能狀態", vs)
         
-        # 均量單位處理
         va_val = va
         if unit == "張": va_val = va / 1000
-        
         va_str = f"{int(va_val):,}"
-        if unit == "股" and va_val > 1000000:
-            va_str = f"{va_val/1000000:.2f}M"
-            
+        if unit == "股" and va_val > 1000000: va_str = f"{va_val/1000000:.2f}M"
         d3.metric("五日均量", f"{va_str} {unit}")
         
-        # 前日量單位處理
         vy_val = vy
         if unit == "張": vy_val = vy / 1000
-        
         vy_str = f"{int(vy_val):,}"
-        if unit == "股" and vy_val > 1000000:
-            vy_str = f"{vy_val/1000000:.2f}M"
-            
+        if unit == "股" and vy_val > 1000000: vy_str = f"{vy_val/1000000:.2f}M"
         d4.metric("昨日量", f"{vy_str} {unit}")
 
-# --- 7. 詳細診斷卡 ---
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None, strategy_info=None, score=0, w_prob=50):
     chg_color = "gray"; pct_txt = "0.00%"
     if df is not None and not df.empty:
@@ -153,7 +132,6 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
             st.markdown(f"<div class='status-tag' style='background-color:{tag_color}; color:white; width:100%; margin-top:10px;'>{tag_text}</div>", unsafe_allow_html=True)
     return False
 
-# --- 8. K線圖 ---
 def render_chart(df, title, color_settings):
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
@@ -163,14 +141,12 @@ def render_chart(df, title, color_settings):
     fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1), name='20日線'), row=1, col=1)
     colors = ['#FF2B2B' if c >= o else '#00E050' for c, o in zip(df['Close'], df['Open'])]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=2, col=1)
-    fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10))
+    fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=10, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 9. AI 戰情診斷室 ---
 def render_ai_battle_dashboard(analysis):
     st.markdown("---")
     st.subheader("🤖 AI 戰情診斷室 (V100 深度版)")
-    
     c1, c2 = st.columns(2)
     with c1:
         w_prob = analysis.get('weekly_prob', 50)
