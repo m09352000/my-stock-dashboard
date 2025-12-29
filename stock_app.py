@@ -3,13 +3,13 @@ import time
 import pandas as pd
 from datetime import datetime, timedelta
 
-# 匯入我們拆分好的模組
+# 匯入模組
 import logic_database as db
 import logic_ai as ai
 import ui_components as ui
 import config_data as config
 
-st.set_page_config(page_title="全球股市戰情室 V104", layout="wide", page_icon="🌎")
+st.set_page_config(page_title="全球股市戰情室", layout="wide", page_icon="🌎")
 
 # --- Session 初始化 ---
 if 'market_type' not in st.session_state: st.session_state['market_type'] = 'TW'
@@ -80,16 +80,19 @@ with st.sidebar:
     st.divider()
     if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.caption("Ver: 104.0 (模組化重構版)")
+    
+    # 唯一的版本提示，放在最底下
+    st.caption("Ver: 105.0")
 
-# --- 主頁面邏輯 ---
+# --- 主頁面 ---
 mode = st.session_state['view_mode']
 m_type = st.session_state['market_type']
 
 if mode == 'welcome':
-    ui.render_header(f"👋 {m_type} 戰情室 V104")
-    if m_type == 'TW': st.info("🇹🇼 台股模式啟用。資料來源：TWSE / Yahoo Finance。")
-    else: st.success("🇺🇸 美股模式啟用。資料來源：Yahoo Finance (Realtime)。")
+    # 乾淨的歡迎頁面，移除囉唆的版本說明
+    ui.render_header(f"👋 {m_type} 戰情室")
+    if m_type == 'TW': st.info("🇹🇼 台股模式啟用")
+    else: st.success("🇺🇸 美股模式啟用")
 
 elif mode == 'analysis':
     code = st.session_state['current_stock']
@@ -200,7 +203,7 @@ elif mode == 'scan':
     ui.render_back_button(lambda: nav_to('welcome'))
 
 elif mode == 'learn':
-    ui.render_header("📖 股市新手村 (終極版)")
+    ui.render_header("📖 股市新手村")
     t1, t2, t3 = st.tabs(["策略解密", "名詞百科", "K線戰法 SOP"])
     with t1: st.markdown(config.STRATEGY_DESC)
     with t2:
