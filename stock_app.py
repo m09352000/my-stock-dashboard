@@ -16,7 +16,7 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="股市戰情室 V93", layout="wide", page_icon="📈")
+st.set_page_config(page_title="股市戰情室 V94", layout="wide", page_icon="📈")
 
 # --- 核心：AI 戰情運算引擎 ---
 def analyze_stock_battle_data(df):
@@ -77,11 +77,9 @@ def analyze_stock_battle_data(df):
 def inject_realtime_data(df, code):
     if df is None or df.empty: return df, None, None
     try:
-        # 如果 yfinance 抓到的資料最後一筆日期是今天，那其實不需要 twstock
         last_date = df.index[-1].date()
         today = datetime.now(timezone(timedelta(hours=8))).date()
         
-        # 嘗試抓即時，如果被 Ban 就跳過，直接用 DataFrame 最後一筆當作目前資料
         real = twstock.realtime.get(code)
         if real['success']:
             rt = real['realtime']
@@ -90,29 +88,21 @@ def inject_realtime_data(df, code):
                 high = float(rt['high']); low = float(rt['low']); open_p = float(rt['open'])
                 vol = float(rt['accumulate_trade_volume'])
                 
-                # 如果是盤中，yfinance 可能還沒更新今天的 K 棒，我們手動補上去
                 if last_date < today:
-                    # 新增一行
-                    new_idx = pd.Timestamp(today)
-                    df.loc[new_idx] = [open_p, high, low, latest, 0, int(vol)*1000] # 假設欄位順序
-                    # 但因為欄位對應麻煩，我們直接更新最後一行如果是今天，或者不做任何事
-                    pass
+                    pass # Yahoo 尚未更新今日K棒，暫不強制補入，避免索引衝突
                 else:
-                    # 更新最後一行
                     last_idx = df.index[-1]
                     df.at[last_idx, 'Close'] = latest
                     df.at[last_idx, 'High'] = max(high, df.at[last_idx, 'High'])
                     df.at[last_idx, 'Low'] = min(low, df.at[last_idx, 'Low'])
                     df.at[last_idx, 'Volume'] = int(vol) * 1000
                 
-                rt_pack = {'latest_trade_price': latest, 'high': high, 'low': low, 'accumulate_trade_volume': vol, 'previous_close': open_p} # 簡化
+                rt_pack = {'latest_trade_price': latest, 'high': high, 'low': low, 'accumulate_trade_volume': vol, 'previous_close': open_p}
                 bid_ask = {'bid_price': rt.get('best_bid_price', []), 'bid_volume': rt.get('best_bid_volume', []), 'ask_price': rt.get('best_ask_price', []), 'ask_volume': rt.get('best_ask_volume', [])}
                 return df, bid_ask, rt_pack
-    except: 
-        pass
+    except: pass
     
-    # Fallback: 如果即時抓不到，就用 DataFrame 最後一筆資料偽裝成即時資料
-    # 這樣畫面才不會變成「查無資料」
+    # Fallback
     latest_row = df.iloc[-1]
     rt_pack_fake = {
         'latest_trade_price': latest_row['Close'],
@@ -126,25 +116,34 @@ def inject_realtime_data(df, code):
 def solve_stock_id(val):
     val = str(val).strip()
     if not val: return None, None
-    # 簡單正規化
     clean_val = re.sub(r'[^\w]', '', val)
-    # 如果是數字且長度為4，直接當作代號回傳，不檢查 twstock 清單 (避免清單失效)
     if clean_val.isdigit() and len(clean_val) == 4:
         return clean_val, clean_val
-    return None, None # 暫時不支援名稱搜尋，確保穩定
+    return None, None
 
-# --- Session State 初始化 ---
+# --- Session State 初始化 (V94: 預載所有代號) ---
 defaults = {
     'view_mode': 'welcome', 'user_id': None, 'page_stack': ['welcome'],
     'current_stock': "", 'current_name': "", 'scan_pool': [], 
-    'scan_target_group': "全部", 'scan_results': [], 'monitor_active': False
+    'scan_target_group': "🔍 全部上市櫃", 'scan_results': [], 'monitor_active': False
 }
 for k, v in defaults.items():
     if k not in st.session_state: st.session_state[k] = v
 
+# 初始化掃描池 (只做一次)
 if not st.session_state['scan_pool']:
-    st.session_state['scan_pool'] = ['2330', '2317', '2454', '4967', '3231'] # 預設幾個熱門股，避免 twstock 初始化失敗
-    st.session_state['all_groups'] = ["🔍 全部上市櫃"]
+    try:
+        # 讀取 twstock 所有代號，過濾出股票與ETF
+        all_codes = [c for c in twstock.codes.values() if c.type in ["股票", "ETF"]]
+        st.session_state['scan_pool'] = sorted([c.code for c in all_codes])
+        
+        # 建立分類選單
+        groups = sorted(list(set(c.group for c in all_codes if c.group)))
+        st.session_state['all_groups'] = ["🔍 全部上市櫃"] + groups
+    except:
+        # 如果 twstock 連代號庫都讀不到，就用備用清單
+        st.session_state['scan_pool'] = ['2330', '2317', '2454', '2603', '2609', '4967', '3231']
+        st.session_state['all_groups'] = ["🔍 全部上市櫃"]
 
 def nav_to(mode, code=None, name=None):
     if code:
@@ -170,23 +169,40 @@ with st.sidebar:
     
     with st.container(border=True):
         st.markdown("### 🤖 AI 掃描雷達")
-        sel_strat_name = st.selectbox("策略", ["⚡ 強力當沖", "📈 穩健短線", "🐢 長線安穩", "🏆 熱門強勢"])
+        
+        # V94: 恢復分類與策略選擇
+        sel_group = st.selectbox("1️⃣ 範圍", st.session_state.get('all_groups', ["全部"]), index=0)
+        strat_map = {"⚡ 強力當沖": "day", "📈 穩健短線": "short", "🐢 長線安穩": "long", "🏆 熱門強勢": "top"}
+        sel_strat_name = st.selectbox("2️⃣ 策略", list(strat_map.keys()))
+        
+        # V94: 新增數量限制，避免跑太久
+        scan_limit = st.slider("3️⃣ 掃描數量上限", 10, 200, 50)
+        
         if st.button("🚀 啟動掃描", use_container_width=True):
-            st.session_state['current_stock'] = "day" # 簡化
-            nav_to('scan', "day"); st.rerun()
+            st.session_state['scan_target_group'] = sel_group
+            st.session_state['current_stock'] = strat_map[sel_strat_name]
+            st.session_state['scan_limit'] = scan_limit # 存入 session
+            st.session_state['scan_results'] = []
+            nav_to('scan', strat_map[sel_strat_name]); st.rerun()
 
     st.divider()
     if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
     if st.button("💬 戰友留言板"): nav_to('chat'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.caption("Ver: 93.0 (Yahoo核心版)")
+    st.caption("Ver: 94.0 (全面解鎖版)")
 
 # --- 主程式 ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 股市戰情室 V93")
-    st.info("系統已切換至 Yahoo Finance 核心，解決資料抓取問題。請直接在左側輸入股票代號。")
+    ui.render_header("👋 股市戰情室 V94")
+    st.info("Yahoo Finance 引擎運作正常。已解鎖「全市場」與「分類」掃描功能。")
+    st.markdown("""
+    **🚀 使用說明：**
+    1. 左側可選擇 **「分類」** (如 半導體、航運) 縮小範圍。
+    2. 使用 **「數量上限」** 滑桿控制掃描時間 (建議 50-100 檔)。
+    3. 點擊 **「啟動掃描」** 開始 AI 選股。
+    """)
 
 elif mode == 'analysis':
     code = st.session_state['current_stock']; name = st.session_state['current_name']
@@ -196,39 +212,28 @@ elif mode == 'analysis':
         with main_placeholder.container():
             is_live = ui.render_header(f"{code} 個股分析", show_monitor=True)
             
-            # 取得資料
             full_id, stock, df, src = db.get_stock_data(code)
             
             if src == "fail":
-                st.error(f"⚠️ 無法取得 {code} 資料。可能原因：代號錯誤或 Yahoo API 暫時異常。")
+                st.error(f"⚠️ 無法取得 {code} 資料。可能原因：代號錯誤或 API 異常。")
                 return False
             
-            # 注入即時 (或偽裝即時)
             df, bid_ask, rt_pack = inject_realtime_data(df, code)
             
-            # 計算顯示數據
             curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]
             chg = curr - prev; pct = (chg/prev)*100
             high = df['High'].iloc[-1]; low = df['Low'].iloc[-1]; amp = ((high - low) / prev) * 100
             vol = df['Volume'].iloc[-1]
             color_settings = db.get_color_settings(code)
             
-            # 儀表板
             info_text = stock.info.get('longBusinessSummary', '資料來源: Yahoo Finance')
             ui.render_company_profile(db.translate_text(info_text))
             
-            # 如果 rt_pack 是偽造的，某些欄位可能不存在，做個防呆
-            mf = "一般"
-            vs = "正常"
-            fh = 0.0
-            turnover = 0.0
+            mf = "一般"; vs = "正常"; fh = 0.0; turnover = 0.0
             
             ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vol, vol, vs, fh, turnover, bid_ask, color_settings, rt_pack)
-            
-            # K線圖
             ui.render_chart(df, f"{code} K線圖", color_settings)
             
-            # AI 戰情
             battle_analysis = analyze_stock_battle_data(df)
             if battle_analysis: ui.render_ai_battle_dashboard(battle_analysis)
 
@@ -261,17 +266,99 @@ elif mode == 'chat':
     for i, r in df_chat.iloc[::-1].head(10).iterrows(): st.info(f"**{r['Nickname']}**: {r['Message']}")
     ui.render_back_button(go_back)
 
-elif mode == 'scan':
-    ui.render_header("🤖 掃描結果 (測試版)")
-    st.info("因更換資料源，目前僅掃描系統預設池。")
-    st.session_state['scan_results'] = []
+elif mode == 'scan': 
+    # V94: 全面掃描邏輯回歸
+    stype = st.session_state['current_stock']; target_group = st.session_state.get('scan_target_group', '全部')
+    title_map = {'day': '⚡ 強力當沖', 'short': '📈 穩健短線', 'long': '🐢 長線安穩', 'top': '🏆 熱門強勢'}
+    ui.render_header(f"🤖 {target_group} ⨉ {title_map.get(stype, stype)}")
     
-    # 簡易掃描
-    pool = ['2330', '2317', '2454', '2603', '2609', '4967', '3231']
-    for c in pool:
-        fid, _, df, src = db.get_stock_data(c)
-        if df is not None:
-             p = df['Close'].iloc[-1]
-             ui.render_detailed_card(c, c, p, df, src, key_prefix="scan", strategy_info="掃描完成")
-             
+    saved_codes = db.load_scan_results(stype) 
+    c1, c2 = st.columns([1, 4]); do_scan = c1.button("🔄 開始智能篩選", type="primary")
+    if saved_codes and not do_scan: c2.info(f"上次記錄: 共 {len(saved_codes)} 檔")
+    else: c2.info(f"目標範圍: {target_group} (上限 {st.session_state.get('scan_limit', 50)} 檔)")
+
+    if do_scan:
+        st.session_state['scan_results'] = []; raw_results = []
+        full_pool = st.session_state['scan_pool']
+        
+        # 1. 篩選目標群組
+        if target_group != "🔍 全部上市櫃":
+             target_pool = [c for c in full_pool if c in twstock.codes and twstock.codes[c].group == target_group]
+        else:
+             target_pool = full_pool
+
+        # 2. 設定進度條與上限
+        limit = st.session_state.get('scan_limit', 50)
+        bar = st.progress(0)
+        
+        count = 0
+        # 為了展示效果，這裡只遍歷前 N 個符合條件的股票
+        # 若要真全掃描，可以把切片去掉，但時間會很久
+        
+        for i, c in enumerate(target_pool):
+            if count >= limit: break
+            
+            # 更新進度條
+            prog = (count + 1) / limit
+            bar.progress(min(prog, 1.0))
+            
+            try:
+                # 取得資料 (自動使用 Yahoo)
+                fid, _, d, src = db.get_stock_data(c)
+                
+                if d is not None and len(d) > 20:
+                    # 注入即時
+                    d_real, _, _ = inject_realtime_data(d, c)
+                    p = d_real['Close'].iloc[-1]; prev = d_real['Close'].iloc[-2]
+                    vol = d_real['Volume'].iloc[-1]
+                    m5 = d_real['Close'].rolling(5).mean().iloc[-1]
+                    m20 = d_real['Close'].rolling(20).mean().iloc[-1]
+                    m60 = d_real['Close'].rolling(60).mean().iloc[-1]
+                    
+                    valid = False
+                    info_txt = ""
+                    
+                    if stype == 'day': 
+                        if vol > d_real['Volume'].iloc[-2]*1.5 and p > m5: 
+                            valid = True; info_txt = "爆量攻擊"
+                    elif stype == 'short': 
+                        if p > m20 and m5 > m20: 
+                            valid = True; info_txt = "多頭排列"
+                    elif stype == 'long': 
+                        if p > m60 and ((p-m60)/m60) < 0.1: 
+                            valid = True; info_txt = "季線支撐"
+                    elif stype == 'top': 
+                        if vol > 2000: 
+                            valid = True; info_txt = "熱門股"
+                    
+                    if valid:
+                        n = twstock.codes[c].name if c in twstock.codes else c
+                        raw_results.append({'c': c, 'n': n, 'p': p, 'd': d_real, 'src': src, 'info': info_txt})
+                        count += 1
+                        
+                # 稍微冷卻一下，雖然 Yahoo 比較快，但不要太暴力
+                time.sleep(0.05) 
+                
+            except: pass
+            
+        bar.empty()
+        st.session_state['scan_results'] = raw_results
+        db.save_scan_results(stype, [x['c'] for x in raw_results])
+        st.rerun()
+
+    display_list = st.session_state['scan_results']
+    if not display_list and not do_scan and saved_codes:
+         # 如果沒有掃描但有舊紀錄，嘗試載入
+         # 為了效能，舊紀錄只載入代號，不即時抓報價 (使用者點進去再抓)
+         temp_list = [{'c':c, 'n':c, 'p':0, 'd':None, 'src':'', 'info':'歷史紀錄'} for c in saved_codes[:20]]
+         display_list = temp_list
+
+    if display_list:
+        for item in display_list:
+            # 這裡為了效能，卡片只顯示基本資訊，點擊才進行詳細分析
+            if ui.render_detailed_card(item['c'], item['n'], item.get('p',0), item.get('d'), item.get('src'), key_prefix=f"scan_{stype}", strategy_info=item.get('info')):
+                nav_to('analysis', item['c'], item['n']); st.rerun()
+    elif do_scan:
+        st.warning("掃描完成，但在限制數量內未發現符合策略的標的。請嘗試放寬條件或增加掃描數量。")
+        
     ui.render_back_button(go_back)
