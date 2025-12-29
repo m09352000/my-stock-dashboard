@@ -4,11 +4,10 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 
-# --- CSS: V78 無閃爍優化版 ---
+# --- CSS: V79 UI ---
 def inject_custom_css():
     st.markdown("""
         <style>
-        /* K線戰法與區塊 */
         .kline-card-header { margin-top: 0.5rem !important; margin-bottom: 0.2rem !important; font-size: 1.1rem !important; font-weight: bold; }
         .action-list ul { padding-left: 1.2rem !important; margin-bottom: 0rem !important; }
         .action-list li { margin-bottom: 0.3rem !important; line-height: 1.6 !important; font-size: 1rem !important; }
@@ -17,46 +16,51 @@ def inject_custom_css():
         .bull-box { background-color: #2e1a1a; border-left: 6px solid #FF2B2B; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
         .bear-box { background-color: #1a2e1a; border-left: 6px solid #00E050; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
         .neutral-box { background-color: #262730; border-left: 6px solid #888; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
-
-        /* 基礎元件微調 */
-        div[data-testid="stVerticalBlock"] > div { gap: 0.4rem; } 
+        div[data-testid="stVerticalBlock"] > div { padding-top: 0.1rem; padding-bottom: 0.1rem; gap: 0.3rem; }
         button { height: auto !important; padding-top: 0.2rem !important; padding-bottom: 0.2rem !important; }
-        div[data-testid="stMetricValue"] { font-size: 1.4rem !important; font-weight: 800 !important; }
-        div[data-testid="stMetricLabel"] { font-size: 0.9rem !important; color: #aaa !important; }
-        hr.compact { margin: 10px 0px !important; border: 0; border-top: 1px solid #444; }
-        
-        /* 即時狀態標籤 */
-        .live-tag { 
-            color: #00FF00; font-weight: bold; font-size: 0.95rem; 
-            border: 1px solid #00FF00; padding: 2px 8px; border-radius: 4px;
-            box-shadow: 0 0 5px rgba(0,255,0,0.3);
-        }
+        div[data-testid="stMetricValue"] { font-size: 1.35rem !important; font-weight: 800 !important; }
+        div[data-testid="stMetricLabel"] { font-size: 0.9rem !important; color: #d0d0d0 !important; }
+        hr.compact { margin: 8px 0px !important; border: 0; border-top: 1px solid #444; }
+        .live-tag { color: #00FF00; font-weight: bold; font-size: 0.9rem; animation: blink 1s infinite; text-shadow: 0 0 5px #00FF00; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
         
         @media only screen and (max-width: 768px) {
-            div[data-testid="stVerticalBlock"] > div { gap: 0.8rem !important; }
-            button { width: 100% !important; margin-top: 5px !important; }
-            .js-plotly-plot { height: 320px !important; }
+            div[data-testid="stVerticalBlock"] > div { gap: 0.8rem !important; padding-top: 0.5rem !important; }
+            button { padding: 0.5rem 1rem !important; font-size: 1rem !important; width: 100% !important; margin-top: 5px !important; }
+            .js-plotly-plot { height: 300px !important; }
         }
         </style>
     """, unsafe_allow_html=True)
 
-# --- 1. 標題 (V78: 簡化，控制權交給 stock_app) ---
+# --- 1. 標題 (V79: 顯示登入狀態) ---
 def render_header(title, show_monitor=False):
     inject_custom_css()
     c1, c2 = st.columns([3, 1])
     c1.title(title)
     
-    # 這裡只負責顯示標題，開關邏輯移至 stock_app 的 sidebar 或主控台
-    # 以避免重新渲染時狀態遺失
+    is_live = False
+    tw_tz = timezone(timedelta(hours=8))
+    now_tw = datetime.now(tw_tz)
+    
     if show_monitor:
-        st.caption(f"V78 高速即時引擎 | 資料來源: TWSE")
+        if 'monitor_active' not in st.session_state: st.session_state['monitor_active'] = False
+        is_live = c2.toggle("🔴 啟動 1秒極速刷新", value=st.session_state['monitor_active'], key="live_toggle_btn")
+        st.session_state['monitor_active'] = is_live
+        
+        if is_live:
+            time_str = now_tw.strftime("%H:%M:%S")
+            st.markdown(f"<span class='live-tag'>● LIVE 連線中 (台灣時間 {time_str})</span>", unsafe_allow_html=True)
+        else:
+            st.caption(f"最後更新: {now_tw.strftime('%Y-%m-%d %H:%M:%S')} (TW) | V79 自動登入版")
             
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
+    return is_live
 
 # --- 2. 返回 ---
 def render_back_button(callback_func):
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-    if st.button("⬅️ 返回列表", use_container_width=True):
+    _, c2, _ = st.columns([2, 1, 2])
+    if c2.button("⬅️ 返回列表", use_container_width=True):
         callback_func()
 
 # --- 3. 新手村卡片 ---
@@ -97,22 +101,25 @@ def render_company_profile(summary):
         with st.expander("🏢 公司簡介與業務", expanded=False):
             st.write(summary)
 
-# --- 5. 儀表板 (V78: 極致即時顯示) ---
+# --- 5. 儀表板 ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              turnover_rate, bid_ask_data, color_settings, 
                              realtime_data=None):
     
-    # 台灣時間
-    tw_tz = timezone(timedelta(hours=8))
-    now_tw = datetime.now(tw_tz).strftime('%H:%M:%S')
+    is_realtime = False
+    update_time_str = ""
     
-    # 使用即時資料覆蓋
     if realtime_data:
+        is_realtime = True
         curr = realtime_data['latest_trade_price']
         high = realtime_data['high']
         low = realtime_data['low']
         vol = int(float(realtime_data['accumulate_trade_volume']))
+        
+        tw_tz = timezone(timedelta(hours=8))
+        now = datetime.now(tw_tz)
+        update_time_str = now.strftime('%H:%M:%S')
         
         prev_close = realtime_data['previous_close']
         if prev_close > 0:
@@ -120,51 +127,45 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
             pct = (chg / prev_close) * 100
             amp = ((high - low) / prev_close) * 100
         
-        # 顏色邏輯
         if chg > 0: val_color = "#FF2B2B"
         elif chg < 0: val_color = "#00E050"
         else: val_color = "#FFFFFF"
     else:
         val_color = "white"
 
-    # 使用 container 確保佈局穩定
     with st.container():
-        # 顯示即時狀態列
-        if realtime_data:
-            st.markdown(f"<div style='margin-bottom:10px;'><span class='live-tag'>● LIVE 連線中: {now_tw}</span></div>", unsafe_allow_html=True)
-            
         m1, m2, m3, m4, m5 = st.columns(5)
         
+        live_indicator = f"<span class='live-tag' style='font-size:0.7rem; vertical-align:middle; margin-left:5px;'>● LIVE</span>" if is_realtime else ""
+        
         m1.markdown(f"""
-            <div style='font-size:0.9rem; color:#aaa'>成交價 (Price)</div>
-            <div style='font-size:1.8rem; font-weight:800; color:{val_color}; line-height:1.2; letter-spacing:1px;'>
+            <div style='font-size:0.9rem; color:#d0d0d0'>成交價 {live_indicator}</div>
+            <div style='font-size:1.6rem; font-weight:800; color:{val_color}; line-height:1.2'>
                 {curr:.2f} 
-            </div>
-            <div style='font-size:1rem; font-weight:bold; color:{val_color}'>
-                {chg:+.2f} ({pct:+.2f}%)
+                <span style='font-size:1rem'>({chg:+.2f} / {pct:+.2f}%)</span>
             </div>
             """, unsafe_allow_html=True)
         
-        m2.metric("最高價 (High)", f"{high:.2f}")
-        m3.metric("最低價 (Low)", f"{low:.2f}")
-        m4.metric("振幅 (Amp)", f"{amp:.2f}%")
+        m2.metric("最高價", f"{high:.2f}")
+        m3.metric("最低價", f"{low:.2f}")
+        m4.metric("振幅", f"{amp:.2f}%")
         m5.metric("主力動向", main_force)
         
         v1, v2, v3, v4, v5 = st.columns(5)
-        v1.metric("今日量 (Vol)", f"{int(vol):,} 張")
+        v1.metric("今日量", f"{int(vol):,} 張")
         
         t_label = "正常"
         if turnover_rate > 20: t_label = "🔥 過熱"
         elif turnover_rate > 10: t_label = "熱絡"
         elif turnover_rate < 0.5: t_label = "❄️ 冷門"
         
-        v2.metric("週轉率 (Turnover)", f"{turnover_rate:.2f}%", t_label)
-        v3.metric("五日均量 (Avg)", f"{int(vol_avg/1000):,} 張")
+        v2.metric("週轉率", f"{turnover_rate:.2f}%", t_label)
+        v3.metric("五日均量", f"{int(vol_avg/1000):,} 張")
         v4.metric("量能狀態", vol_status)
         v5.metric("外資持股", f"{foreign_held:.1f}%")
     
     if bid_ask_data:
-        # V78: 移除 Expander，直接顯示以求速度
+        # 移除 expander 提升速度
         st.markdown("---")
         st.caption("📊 即時五檔 (Best Bid/Ask)")
         b_price = bid_ask_data.get('bid_price', ['-'])[0]
@@ -338,7 +339,7 @@ def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df=None):
     with t3:
         if df is not None and len(df) >= 5:
             try:
-                # 簡單分析邏輯以避免依賴問題
+                # 這裡直接實作簡單版分析邏輯，以避免循環匯入或未定義錯誤
                 c1 = df.iloc[-1]; c2 = df.iloc[-2]; c3 = df.iloc[-3]
                 is_red = lambda c: c['Close'] > c['Open']
                 title = "盤整待變"; advice = "近期 K 線無明顯反轉訊號。"; box = "neutral-box"
