@@ -23,36 +23,40 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V83", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V84", layout="wide")
 
-# --- V83: 高階字串清洗與比對 ---
-def clean_ocr_text(text):
-    """
-    V83 專用清洗：移除股價數字、標籤，只保留可能的股名
-    """
-    # 移除常見雜訊
-    garbage = ["試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", "幅度", "代號"]
-    for g in garbage:
-        text = text.replace(g, "")
-    
-    # 使用 Regex 移除右側的股價數字 (例如 "華城 796.00" -> "華城")
-    # 邏輯：遇到連續數字或小數點，就切斷
-    text = re.sub(r'[\d]+\.?[\d]*', '', text) 
-    
-    # 移除特殊符號，只留中文、英文、- (給KY股用)
-    text = re.sub(r'[^\u4e00-\u9fa5a-zA-Z\-]', '', text)
-    return text.strip()
-
+# --- V84: 強力字串清洗與比對 ---
 def find_best_match_stock(text):
     """
-    V83 強化版：包含搜尋 + 模糊比對
+    在所有台股代號與名稱中，尋找與 text 最相似的股票
     """
-    raw_input = text.upper()
-    clean_input = clean_ocr_text(text).upper()
+    # 1. 暴力清洗：移除所有非股票相關的雜訊
+    # 針對圖片左側的標籤進行針對性刪除
+    garbage_words = [
+        "試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", 
+        "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存"
+    ]
     
-    if len(clean_input) < 2: return None, None
+    # 移除數字與小數點 (例如 "華城 796.00" -> "華城")
+    # V84 優化 Regex: 只要是連續數字加小數點，一律視為股價移除
+    text = re.sub(r'\d+\.\d+', '', text)
+    text = re.sub(r'\d+\s', '', text) # 移除 "100 " 這種整數價格
+    
+    # 移除括號內的字
+    text = re.sub(r'\(.*?\)', '', text)
+    text = re.sub(r'\[.*?\]', '', text)
 
-    # 建立搜尋清單
+    clean_text = text.replace(" ", "").upper()
+    for w in garbage_words:
+        clean_text = clean_text.replace(w, "")
+    
+    # 移除特殊符號，保留中文、英文、數字(代號)、- (KY股)
+    clean_text = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9\-]', '', clean_text)
+    clean_text = clean_text.strip()
+
+    if len(clean_text) < 2: return None, None
+
+    # 2. 建立搜尋清單
     all_codes = {}
     for code, data in twstock.codes.items():
         if data.type == "股票":
@@ -61,93 +65,101 @@ def find_best_match_stock(text):
     name_to_code = {v: k for k, v in all_codes.items()}
     all_names = list(name_to_code.keys())
 
-    # 1. 直接匹配 (精準)
-    if clean_input in name_to_code:
-        return name_to_code[clean_input], clean_input
-    if raw_input in all_codes: # 如果 OCR 讀到的是代號
-        return raw_input, all_codes[raw_input]
+    # 3. 策略 A: 代號完全匹配
+    if clean_text in all_codes:
+        return clean_text, all_codes[clean_text]
+    
+    # 4. 策略 B: 名稱完全匹配
+    if clean_text in name_to_code:
+        return name_to_code[clean_text], clean_text
 
-    # 2. 包含搜尋 (例如 "華城電" -> 包含 "華城")
-    # 許多時候 OCR 會多讀或少讀一個字
-    for name in all_names:
-        if len(name) >= 2 and (name in clean_input or clean_input in name):
-            # 避免 "金" 對到 "台新金" 這種太短的誤判
-            if abs(len(name) - len(clean_input)) <= 1: 
-                return name_to_code[name], name
-
-    # 3. 模糊比對 (容錯)
-    matches = difflib.get_close_matches(clean_input, all_names, n=1, cutoff=0.5)
+    # 5. 策略 C: 模糊比對 (容錯)
+    # V84: 放寬相似度門檻到 0.4，希望能抓到更多字型破碎的字
+    matches = difflib.get_close_matches(clean_text, all_names, n=1, cutoff=0.4)
     if matches:
         return name_to_code[matches[0]], matches[0]
+        
+    # 6. 策略 D: 包含搜尋 (針對 OCR 黏在一起的情況，如 "|華城")
+    for name in all_names:
+        if len(name) >= 2 and name in clean_text:
+            return name_to_code[name], name
 
     return None, None
 
-# --- V83: 矩陣式多重掃描引擎 ---
+# --- V84 重寫: HDR 動態多重曝光引擎 ---
 def process_image_upload(image_file):
     debug_info = {"raw_text": "", "processed_img": None, "error": None}
     found_stocks = set()
-    full_ocr_results = ""
+    full_ocr_text = ""
     
     try:
         # 1. 載入圖片
         img = Image.open(image_file)
         if img.mode != 'RGB': img = img.convert('RGB')
         
-        # 2. 超解析放大 (3x) - 基礎建設
+        # 2. 3x 超解析放大
         target_width = img.width * 3
         target_height = img.height * 3
         img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
         w, h = img.size
+        
+        # 3. 寬版裁切 (保留左邊 0% ~ 60%)
+        # V84 改進: 不再物理切除左邊，避免切到字。改用後續清洗處理標籤。
+        # 只切除右邊的價格區，避免數字干擾
+        crop_img = img.crop((0, 0, int(w * 0.6), h))
+        
+        gray = crop_img.convert('L')
+        inverted = ImageOps.invert(gray) # 黑底轉白 (白字)
+        enhancer = ImageEnhance.Contrast(inverted)
+        high_contrast = enhancer.enhance(2.5) # 拉高對比
 
-        # --- 策略 A: 幾何切割 (標準切法) ---
-        # 切除左邊 12% (避開標籤)，保留到 50% (避開股價)
-        crop_std = img.crop((int(w*0.12), 0, int(w*0.55), h))
+        # --- HDR 多重曝光處理 ---
         
-        # --- 策略 B: 高亮度濾鏡 (針對彩色字) ---
-        # 轉灰階後，拉高對比，讓黃色/白色字體浮現
-        gray = crop_std.convert('L')
-        enhancer = ImageEnhance.Contrast(gray)
-        img_contrast = enhancer.enhance(3.0) # 強烈對比
+        # 曝光層 1: 高閥值 (只留最亮的字，過濾背景標籤)
+        # 適合: 黃色、白色、亮綠色文字
+        thresh_high = 180
+        layer_bright = high_contrast.point(lambda x: 255 if x > thresh_high else 0, mode='1')
         
-        # --- 策略 C: 二值化 (極端黑白) ---
-        thresh = 140
-        fn = lambda x : 255 if x > thresh else 0
-        img_bin = img_contrast.point(fn, mode='1')
+        # 曝光層 2: 低閥值 (保留較暗的字，可能會包含標籤)
+        # 適合: 紅色、深藍色文字
+        thresh_low = 100
+        layer_dark = high_contrast.point(lambda x: 255 if x > thresh_low else 0, mode='1')
         
-        # 儲存預覽圖 (給使用者看我們切了哪裡)
-        debug_info['processed_img'] = img_bin
+        # 曝光層 3: 原始灰階 (保留所有細節)
+        # 適合: 筆畫複雜或二值化失敗的字
+        layer_gray = high_contrast
 
-        # 3. 執行矩陣式 OCR (跑多次，求聯集)
+        # 4. 執行 OCR (對三種層次都跑一次)
+        configs = [
+            (layer_bright, '--psm 6'),           # 模式 1: 乾淨的文字塊
+            (layer_dark, '--psm 6'),             # 模式 2: 包含暗部文字
+            (layer_gray, '--psm 6'),             # 模式 3: 灰階細節
+            (layer_bright, '--psm 4'),           # 模式 4: 單欄模式 (針對英文)
+        ]
         
-        # Pass 1: 繁體中文 + 英文混合 (針對一般台股)
-        # psm 6: 假設是統一文字塊
-        text_pass1 = pytesseract.image_to_string(img_bin, lang='chi_tra+eng', config='--psm 6')
-        
-        # Pass 2: 純英文模式 (針對 SOFI, MU)
-        # psm 4: 假設是單欄文字
-        text_pass2 = pytesseract.image_to_string(img_bin, lang='eng', config='--psm 4')
-        
-        # Pass 3: 寬鬆模式 (針對字體破碎)
-        # 使用原圖(非二值化)再跑一次，有時候二值化會把筆畫切斷
-        text_pass3 = pytesseract.image_to_string(gray, lang='chi_tra', config='--psm 6')
+        # 儲存其中一張給使用者看
+        debug_info['processed_img'] = layer_bright
 
-        # 合併所有結果
-        full_text_combined = text_pass1 + "\n" + text_pass2 + "\n" + text_pass3
-        debug_info['raw_text'] = full_text_combined
+        for img_layer, psm in configs:
+            # 混合語言辨識
+            text = pytesseract.image_to_string(img_layer, lang='chi_tra+eng', config=psm)
+            full_ocr_text += text + "\n"
 
-        # 4. 智慧解析
-        lines = full_text_combined.split('\n')
-        processed_lines = set() # 避免重複處理同一行
+        debug_info['raw_text'] = full_ocr_text
+
+        # 5. 解析與去重
+        lines = full_ocr_text.split('\n')
+        seen_stocks = set() # 用來記錄這輪找到的，避免重複 print
         
         for line in lines:
-            line = line.strip()
-            if len(line) < 2 or line in processed_lines: continue
-            processed_lines.add(line)
+            clean_line = line.strip()
+            if len(clean_line) < 2: continue
             
-            # 呼叫 V83 比對邏輯
-            sid, sname = find_best_match_stock(line)
-            if sid:
+            sid, sname = find_best_match_stock(clean_line)
+            
+            if sid and sid not in seen_stocks:
                 found_stocks.add((sid, sname))
+                seen_stocks.add(sid)
 
         return list(found_stocks), debug_info
 
@@ -155,7 +167,7 @@ def process_image_upload(image_file):
         debug_info['error'] = str(e)
         return [], debug_info
 
-# --- 以下維持 V79~V82 的核心功能 (即時連動/DB/UI) ---
+# --- 以下維持 V79 核心功能 (即時連動/DB/UI) ---
 
 def inject_realtime_data(df, code):
     if df is None or df.empty: return df, None, None
@@ -310,14 +322,14 @@ with st.sidebar:
             st.query_params.clear()
             nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 83.0 (矩陣式多重掃描版)")
+    st.markdown("---"); st.caption("Ver: 84.0 (HDR多重曝光版)")
 
 # --- Main Logic ---
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V83")
-    st.markdown("### 🚀 V83 更新：矩陣式多重掃描引擎\n* **🔁 三重掃描**：中文/英文/圖形增強模式交叉比對，絕不漏接。\n* **🧹 智慧清洗**：自動切除股價數字與雜訊標籤。\n* **🎯 包含搜尋**：即便 OCR 漏字，也能透過部分匹配找回股票。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V84")
+    st.markdown("### 🚀 V84 更新：HDR 動態多重曝光引擎\n* **🌈 全色域偵測**：針對亮色、暗色文字分別曝光，確保紅/綠/白字皆可辨識。\n* **🧹 智慧除噪**：移除股價數字、標籤與括號，純化股票名稱。\n* **👀 動態預覽**：讓您看見 AI 眼中的世界。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員中心")
@@ -356,11 +368,11 @@ elif mode == 'watch':
             if code: db.update_watchlist(uid, code, "add"); st.toast(f"已加入: {name}", icon="✅"); time.sleep(0.5); st.rerun()
             else: st.error(f"找不到: {add_c}")
 
-        with st.expander("📸 截圖匯入 (V83 矩陣引擎)", expanded=True):
+        with st.expander("📸 截圖匯入 (V84 HDR版)", expanded=True):
             if is_ocr_ready():
                 uploaded_file = st.file_uploader("上傳自選股截圖 (支援看盤軟體黑底圖)", type=['png', 'jpg', 'jpeg'])
                 if uploaded_file:
-                    with st.spinner("AI 正在進行矩陣式多重掃描..."): 
+                    with st.spinner("AI 正在進行 HDR 多重曝光掃描..."): 
                         found_list, debug_info = process_image_upload(uploaded_file)
                     
                     if found_list:
@@ -377,9 +389,9 @@ elif mode == 'watch':
                                 st.rerun()
                         else: st.info("所有股票都已在清單中。")
                         
-                        with st.expander("👀 查看 AI 看到的畫面"):
+                        with st.expander("👀 查看 AI 處理畫面"):
                             if debug_info['processed_img']:
-                                st.image(debug_info['processed_img'], caption="高對比二值化影像")
+                                st.image(debug_info['processed_img'], caption="HDR 高亮曝光層 (專抓股票名)")
                             st.text(debug_info['raw_text'])
                     else: 
                         st.error("未能辨識有效股票。")
@@ -409,7 +421,7 @@ elif mode == 'watch':
                         st.success("已移除"); st.rerun()
 
             st.markdown("<hr class='compact'>", unsafe_allow_html=True)
-            if st.button("🚀 啟動 AI 詳細診斷 (V83)", use_container_width=True): 
+            if st.button("🚀 啟動 AI 詳細診斷 (V84)", use_container_width=True): 
                 st.session_state['watch_active'] = True; st.rerun()
             
             if st.session_state['watch_active']:
