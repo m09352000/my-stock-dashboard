@@ -4,7 +4,7 @@
 import pandas as pd
 
 def generate_detailed_report(df, score, weekly_prob, monthly_prob):
-    """生成千字文深度報告"""
+    """生成深度報告"""
     latest = df.iloc[-1]
     p = latest['Close']
     m5 = df['Close'].rolling(5).mean().iloc[-1]
@@ -38,7 +38,7 @@ def generate_detailed_report(df, score, weekly_prob, monthly_prob):
     return trend_txt + vol_txt + prob_txt
 
 def generate_scan_reason(df):
-    """生成掃描列表的短評理由"""
+    """生成掃描理由"""
     reasons = []
     latest = df.iloc[-1]
     p = latest['Close']
@@ -77,7 +77,7 @@ def generate_scan_reason(df):
     return " + ".join(reasons[:3])
 
 def analyze_stock_battle_data(df):
-    """計算勝率與建議"""
+    """AI 診斷核心"""
     if df is None or len(df) < 30: return None
     latest = df.iloc[-1]
     close = latest['Close']
@@ -101,7 +101,6 @@ def analyze_stock_battle_data(df):
     vol_ma5 = df['Volume'].rolling(5).mean().iloc[-1]
     vol_ratio = latest['Volume'] / vol_ma5 if vol_ma5 > 0 else 1
     
-    # 週勝率
     w_score = 50 
     if close > ma5: w_score += 15
     if ma5 > ma20: w_score += 10
@@ -110,7 +109,6 @@ def analyze_stock_battle_data(df):
     elif rsi > 80: w_score -= 10
     weekly_prob = min(max(w_score, 10), 98)
 
-    # 月勝率
     m_score = 50
     if close > ma20: m_score += 20
     if ma20 > ma60: m_score += 20
