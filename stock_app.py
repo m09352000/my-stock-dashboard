@@ -4,15 +4,15 @@ import twstock
 import pandas as pd
 import re
 import shutil
-import subprocess
 import os
-from PIL import Image, ImageOps, ImageEnhance, ImageFilter
+from PIL import Image, ImageOps, ImageEnhance
 import pytesseract
 import importlib
 from datetime import datetime, time as dt_time, timedelta, timezone
 import difflib 
 
 # --- V90: 安全引入機制 (防爆核心) ---
+# 嘗試引入 OpenCV，若失敗則自動降級為 PIL 模式，避免程式崩潰
 try:
     import cv2
     import numpy as np
@@ -20,10 +20,11 @@ try:
 except ImportError:
     OPENCV_AVAILABLE = False
 
+# 引入自定義模組
 import stock_db as db
 import stock_ui as ui
 
-# 載入知識庫
+# 動態載入知識庫，避免單檔錯誤導致全站崩潰
 try:
     import knowledge
     importlib.reload(knowledge)
@@ -169,7 +170,7 @@ def process_image_upload(image_file):
         debug_info['error'] = str(e)
         return [], debug_info
 
-# --- 以下維持 V79~V88 核心功能 ---
+# --- 以下維持應用程式核心功能 ---
 
 def inject_realtime_data(df, code):
     if df is None or df.empty: return df, None, None
@@ -432,7 +433,6 @@ elif mode == 'watch':
         else: st.info("目前無自選股")
         ui.render_back_button(go_back)
 
-# (Analysis, learn, chat, scan 等區塊維持 V78 的程式碼，請直接使用 V78 的程式碼)
 elif mode == 'analysis':
     code = st.session_state['current_stock']; name = st.session_state['current_name']
     main_placeholder = st.empty()
@@ -463,119 +463,3 @@ elif mode == 'analysis':
                 delta = df['Close'].diff(); u = delta.copy(); d = delta.copy(); u[u<0]=0; d[d>0]=0
                 rs = u.rolling(14).mean() / d.abs().rolling(14).mean(); rsi = (100 - 100/(1+rs)).iloc[-1]
                 bias = ((curr-m60)/m60)*100
-                ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df)
-            ui.render_back_button(go_back)
-            return is_live
-    is_live_mode = render_content()
-    if is_live_mode:
-        while True:
-            time.sleep(1)
-            still_live = render_content()
-            if not still_live: break
-
-elif mode == 'learn':
-    ui.render_header("📖 股市新手村"); t1, t2, t3 = st.tabs(["策略說明", "名詞解釋", "🕯️ K線型態"])
-    with t1: st.markdown(STRATEGY_DESC)
-    with t2:
-        q = st.text_input("搜尋名詞")
-        for cat, items in STOCK_TERMS.items():
-            with st.expander(cat, expanded=True):
-                for k, v in items.items():
-                    if not q or q in k: ui.render_term_card(k, v)
-    with t3:
-        st.info("這裡展示常見的 K 線反轉訊號，紅 K 代表漲 (台股規則)。")
-        st.subheader("🔥 多方訊號 (看漲)")
-        for name, data in KLINE_PATTERNS.get("bull", {}).items(): ui.render_kline_pattern_card(name, data)
-        st.divider()
-        st.subheader("❄️ 空方訊號 (看跌)")
-        for name, data in KLINE_PATTERNS.get("bear", {}).items(): ui.render_kline_pattern_card(name, data)
-    ui.render_back_button(go_back)
-
-elif mode == 'chat':
-    ui.render_header("💬 戰友留言板")
-    if not st.session_state['user_id']: st.warning("請先登入")
-    else:
-        with st.form("msg"):
-            m = st.text_input("留言內容")
-            if st.form_submit_button("送出") and m: db.save_comment(st.session_state['user_id'], m); st.rerun()
-    st.markdown("<hr class='compact'>", unsafe_allow_html=True); df = db.get_comments()
-    for i, r in df.iloc[::-1].head(20).iterrows(): st.info(f"**{r['Nickname']}** ({r['Time']}):\n{r['Message']}")
-    ui.render_back_button(go_back)
-
-elif mode == 'scan': 
-    stype = st.session_state['current_stock']; target_group = st.session_state.get('scan_target_group', '全部')
-    title_map = {'day': '⚡ 強力當沖', 'short': '📈 穩健短線', 'long': '🐢 長線安穩', 'top': '🏆 熱門強勢'}
-    ui.render_header(f"🤖 {target_group} ⨉ {title_map.get(stype, stype)}")
-    saved_codes = db.load_scan_results(stype) 
-    c1, c2 = st.columns([1, 4]); do_scan = c1.button("🔄 開始智能篩選", type="primary")
-    if saved_codes and not do_scan: c2.info(f"上次記錄: 共 {len(saved_codes)} 檔")
-    else: c2.info(f"目標範圍: {target_group}")
-
-    if do_scan:
-        st.session_state['scan_results'] = []; raw_results = []
-        full_pool = st.session_state['scan_pool']
-        if target_group != "🔍 全部上市櫃": target_pool = [c for c in full_pool if c in twstock.codes and twstock.codes[c].group == target_group]
-        else: target_pool = full_pool
-        if not target_pool: st.error("無資料"); st.stop()
-        bar = st.progress(0); limit = 500 
-        for i, c in enumerate(target_pool):
-            if i >= limit: break
-            bar.progress((i+1)/min(len(target_pool), limit))
-            try:
-                fid, _, d, src = db.get_stock_data(c)
-                if d is not None:
-                    d_real, _, _ = inject_realtime_data(d, c)
-                    n = twstock.codes[c].name if c in twstock.codes else c
-                    p = d_real['Close'].iloc[-1] if isinstance(d_real, pd.DataFrame) else d_real['Close']
-                    sort_val = -999999; info_txt = ""
-                    if isinstance(d_real, pd.DataFrame) and len(d_real) > 20:
-                        vol = d_real['Volume'].iloc[-1]; vol_prev = d_real['Volume'].iloc[-2]
-                        m5 = d_real['Close'].rolling(5).mean().iloc[-1]
-                        m20 = d_real['Close'].rolling(20).mean().iloc[-1]
-                        m60 = d_real['Close'].rolling(60).mean().iloc[-1]
-                        prev = d_real['Close'].iloc[-2]
-                        pct = ((p - prev) / prev) * 100
-                        amp = ((d_real['High'].iloc[-1] - d_real['Low'].iloc[-1]) / prev) * 100
-                        delta = d_real['Close'].diff(); u = delta.copy(); down = delta.copy(); u[u<0]=0; down[down>0]=0
-                        rs = u.rolling(14).mean() / down.abs().rolling(14).mean()
-                        rsi = (100 - 100/(1+rs)).iloc[-1]
-                        valid = False
-                        if stype == 'day': 
-                            if vol > vol_prev * 1.5 and p > d_real['Open'].iloc[-1] and p > m5 and amp > 2:
-                                sort_val = vol; info_txt = f"🔥 爆量 {int(vol/vol_prev)} 倍 | 振幅 {amp:.1f}%"; valid = True
-                        elif stype == 'short': 
-                            if m5 > m20 and p > m20 and 50 < rsi < 75:
-                                sort_val = pct; info_txt = f"🚀 多頭排列 | RSI {rsi:.0f}"; valid = True
-                        elif stype == 'long': 
-                            bias = ((p - m60)/m60)*100
-                            if p > m60 and -5 < bias < 10: 
-                                sort_val = vol; info_txt = f"🐢 季線之上 | 乖離 {bias:.1f}%"; valid = True
-                        elif stype == 'top': 
-                            if vol > 1000000: 
-                                sort_val = pct; info_txt = f"🏆 漲幅 {pct:.2f}% | 量 {int(vol/1000)}張"; valid = True
-                        if valid: raw_results.append({'c': c, 'n': n, 'p': p, 'd': d_real, 'src': src, 'val': sort_val, 'info': info_txt})
-            except: pass
-        bar.empty()
-        raw_results.sort(key=lambda x: x['val'], reverse=True)
-        top_50 = [x['c'] for x in raw_results[:50]]
-        db.save_scan_results(stype, top_50)
-        st.session_state['scan_results'] = raw_results[:50]; st.rerun() 
-
-    display_list = st.session_state['scan_results']
-    if not display_list and not do_scan and saved_codes and target_group == "🔍 全部上市櫃":
-         temp_list = []
-         for i, c in enumerate(saved_codes[:50]):
-             fid, _, d, src = db.get_stock_data(c)
-             if d is not None:
-                 d_real, _, _ = inject_realtime_data(d, c)
-                 p = d_real['Close'].iloc[-1] if isinstance(d_real, pd.DataFrame) else d_real['Close']
-                 n = twstock.codes[c].name if c in twstock.codes else c
-                 temp_list.append({'c':c, 'n':n, 'p':p, 'd':d_real, 'src':src, 'info': f"AI 推薦 #{i+1}"})
-         display_list = temp_list
-
-    if display_list:
-        for i, item in enumerate(display_list):
-            if ui.render_detailed_card(item['c'], item['n'], item['p'], item['d'], item['src'], key_prefix=f"scan_{stype}", rank=i+1, strategy_info=item['info']):
-                nav_to('analysis', item['c'], item['n']); st.rerun()
-    elif not do_scan: st.warning("請點擊上方按鈕「開始智能篩選」")
-    ui.render_back_button(go_back)
