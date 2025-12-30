@@ -1,6 +1,4 @@
 # logic_ai.py
-# AI 核心層：負責技術指標運算、勝率評估、報告生成
-
 import pandas as pd
 
 def generate_detailed_report(df, score, weekly_prob, monthly_prob):
@@ -38,7 +36,6 @@ def generate_detailed_report(df, score, weekly_prob, monthly_prob):
     return trend_txt + vol_txt + prob_txt
 
 def generate_scan_reason(df):
-    """生成掃描理由"""
     reasons = []
     latest = df.iloc[-1]
     p = latest['Close']
@@ -77,7 +74,6 @@ def generate_scan_reason(df):
     return " + ".join(reasons[:3])
 
 def analyze_stock_battle_data(df):
-    """AI 診斷核心"""
     if df is None or len(df) < 30: return None
     latest = df.iloc[-1]
     close = latest['Close']
