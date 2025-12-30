@@ -9,7 +9,7 @@ import logic_ai as ai
 import ui_components as ui
 import config_data as config
 
-st.set_page_config(page_title="全球股市戰情室", layout="wide", page_icon="🌎")
+st.set_page_config(page_title="全球股市戰情室 V108", layout="wide", page_icon="🌎")
 
 # --- Session 初始化 ---
 if 'market_type' not in st.session_state: st.session_state['market_type'] = 'TW'
@@ -80,6 +80,7 @@ with st.sidebar:
     st.divider()
     if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
+    
     st.caption("Ver: 108.0 (模組化終極修復)")
 
 # --- 主程式 ---
@@ -95,8 +96,8 @@ elif mode == 'analysis':
     code = st.session_state['current_stock']
     name = st.session_state['current_name']
     
-    # 1. 先抓一次歷史資料 (Heavy, Cached)
-    fid, stock, df_hist, src = db.get_stock_data(code)
+    # 修正重點：接收 dict 格式的 stock_info
+    fid, stock_info, df_hist, src = db.get_stock_data(code)
     
     main_placeholder = st.empty()
     
@@ -105,9 +106,7 @@ elif mode == 'analysis':
             ui.render_header(f"{name} ({code})")
             st.error(f"⚠️ 無法取得 {code} 資料。")
     else:
-        # 2. 進入即時刷新迴圈
         while True:
-            # 抓即時並縫合 (Light)
             df_display, _, rt_pack = db.get_realtime_data(df_hist, code)
             
             with main_placeholder.container():
@@ -127,8 +126,10 @@ elif mode == 'analysis':
                     unit = "股" if not code.isdigit() else "張"
                     vol_disp = vol if unit == "股" else vol/1000
                     
-                    info = stock.info.get('longBusinessSummary', '')
-                    ui.render_company_profile(db.translate_text(info))
+                    # 修正：直接從 dict 取得資料，不需 .info
+                    info_text = stock_info.get('longBusinessSummary', '')
+                    ui.render_company_profile(db.translate_text(info_text))
+                    
                     ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, "一般", vol_disp, vy, va, vs, 0, 0, None, None, rt_pack, unit=unit, code=code)
                     ui.render_chart(df_display, f"{name} K線圖", db.get_color_settings(code))
                     
@@ -165,7 +166,6 @@ elif mode == 'scan':
             if count >= limit: break
             bar.progress(min((count+1)/limit, 1.0))
             try:
-                # 掃描使用 cached 函數
                 _, _, df, src = db.get_stock_data(c)
                 if df is not None and len(df) > 30:
                     battle = ai.analyze_stock_battle_data(df)
