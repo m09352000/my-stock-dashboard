@@ -1,5 +1,5 @@
 # logic_database.py
-# V118: 資料核心 (不死鳥架構 + 自動生成介紹)
+# V119: 資料核心 (整合 Voidful GitHub 資料源 + 介面淨空優化)
 
 import pandas as pd
 import twstock
@@ -23,18 +23,45 @@ USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
 COMMENTS_FILE = 'stock_comments.csv'
 
-# --- 輔助：自動生成公司介紹 (當 Yahoo 抓不到時) ---
-def generate_fallback_info(code, name, sector):
-    """如果抓不到資料，就自己寫一段介紹，避免空白"""
-    if not sector or sector == "-": sector = "一般"
-    
-    desc = f"""
-    **{name} ({code})** 是一家位於台灣的上市櫃公司，主要業務範疇屬於 **{sector}**。
-    
-    該公司在台灣股市佔有一席之地，投資人可關注其營收變化與產業趨勢。
-    (註：由於資料源暫時無法取得詳細英文財報，本段文字由 AI 根據基本資料自動生成)
+# --- 輔助：資料來源擴充 (Voidful) ---
+def get_data_from_voidful(code):
     """
-    return desc
+    [cite_start]從 voidful/tw_stocker GitHub 資料庫抓取備用數據 [cite: 1]
+    這是一個開源的台股資料庫，包含近 60 天的 5 分鐘線資料。
+    """
+    try:
+        # 建立 raw content url
+        url = f"https://raw.githubusercontent.com/voidful/tw_stocker/main/data/{code}.csv"
+        
+        # 讀取 CSV (Index 為 Datetime)
+        df = pd.read_csv(url, index_col='Datetime', parse_dates=True)
+        
+        # 資料清洗：統一欄位名稱 (小寫轉大寫首字: open -> Open)
+        df.columns = [c.capitalize() for c in df.columns]
+        
+        # 移除時區 (避免與本地時間衝突)
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+            
+        # 確保有 Volume 欄位 (有些源可能是 volume)
+        if 'Volume' not in df.columns and 'volume' in df.columns:
+             df.rename(columns={'volume': 'Volume'}, inplace=True)
+             
+        # 簡單過濾異常值
+        df = df[df['Volume'] > 0]
+        
+        return df
+    except Exception as e:
+        # 如果 Voidful 也沒有 (例如美股或極冷門股)，就回傳空
+        return pd.DataFrame()
+
+# --- 輔助：自動生成公司介紹 ---
+def generate_fallback_info(code, name, sector):
+    """
+    修改：如果不顯示預設文字，這裡直接回傳空字串。
+    讓介面保持乾淨，不要顯示 '由 AI 自動生成'。
+    """
+    return "" 
 
 def translate_sector(text):
     map_dict = {
@@ -69,7 +96,7 @@ def init_db():
         df.to_csv(COMMENTS_FILE, index=False)
 init_db()
 
-# --- 股票數據核心 (V118: 容錯機制) ---
+# --- 股票數據核心 (V119: 雙源救援機制) ---
 @st.cache_data(ttl=300, show_spinner=False)
 def get_stock_data(code):
     try:
@@ -79,7 +106,7 @@ def get_stock_data(code):
         # 1. 預設結構 (絕對有值)
         stock_info = {
             'name': code, 'code': code, 
-            'longBusinessSummary': "", # 先留空，後面補
+            'longBusinessSummary': "", 
             'sector': "-", 'industry': "-",
             'trailingEps': 0.0, 'trailingPE': 0.0
         }
@@ -90,36 +117,34 @@ def get_stock_data(code):
             stock_info['name'] = tw_data.name
             stock_info['sector'] = tw_data.group if hasattr(tw_data, 'group') else "台股"
 
-        # 3. Yahoo 抓取 (容許失敗)
+        # 3. 嘗試 Yahoo 抓取 (主要來源)
         df = pd.DataFrame()
+        data_source = "fail"
+        
         if is_tw:
             for suffix in ['.TW', '.TWO']:
                 try:
                     t = yf.Ticker(f"{code}{suffix}")
-                    # 嘗試抓歷史
                     df = t.history(period="1y", interval="1d", auto_adjust=True)
                     
-                    # 嘗試抓基本面
+                    # 抓取基本面
                     try:
                         info = t.info
                         if info:
-                            # 如果 Yahoo 有給 summary，就用；否則等一下自動生成
                             if 'longBusinessSummary' in info and len(info['longBusinessSummary']) > 10:
                                 stock_info['longBusinessSummary'] = info['longBusinessSummary']
-                            
-                            # 更新產業
                             if 'sector' in info: stock_info['sector'] = translate_sector(info['sector'])
                             if 'industry' in info: stock_info['industry'] = translate_sector(info['industry'])
-                            
-                            # 更新數據
                             stock_info['trailingEps'] = info.get('trailingEps', 0.0)
                             stock_info['trailingPE'] = info.get('trailingPE', 0.0)
                     except: pass
                     
-                    if not df.empty: break
+                    if not df.empty: 
+                        data_source = "yahoo"
+                        break
                 except: continue
         else:
-            # 美股
+            # 美股邏輯
             t = yf.Ticker(code)
             df = t.history(period="1y", interval="1d", auto_adjust=True)
             try:
@@ -130,27 +155,34 @@ def get_stock_data(code):
                 stock_info['industry'] = translate_sector(info.get('industry', '-'))
                 stock_info['trailingEps'] = info.get('trailingEps', 0.0)
                 stock_info['trailingPE'] = info.get('trailingPE', 0.0)
+                data_source = "yahoo"
             except: pass
 
-        # 4. 補完計畫：如果沒有介紹，自動生成
+        # 4. 救援機制：如果 Yahoo 沒資料，嘗試 Voidful GitHub (備用來源)
+        if df.empty and is_tw:
+            # st.toast(f"正在切換至備用資料源讀取 {code}...", icon="🔄") # 除錯用，可註解
+            df = get_data_from_voidful(code)
+            if not df.empty:
+                data_source = "github_voidful"
+                # 標記這是來自 GitHub 的資料，可能沒有基本面
+                if stock_info['sector'] == "-": stock_info['sector'] = "台股(GitHub源)"
+
+        # 5. 補完計畫：如果沒有介紹，呼叫 fallback (現在會回傳空字串)
         if not stock_info['longBusinessSummary']:
             stock_info['longBusinessSummary'] = generate_fallback_info(code, stock_info['name'], stock_info['sector'])
 
-        # 5. 回傳 (就算 df 是空的，也回傳 stock_info 讓標題能顯示)
-        # 移除時區
+        # 6. 回傳
         if not df.empty and df.index.tz is not None:
             df.index = df.index.tz_localize(None)
             
-        return code, stock_info, df, "yahoo" # 永遠回傳 yahoo 讓程式繼續跑
+        return code, stock_info, df, data_source
 
     except Exception as e:
         print(f"Data Error: {e}")
-        # 發生嚴重錯誤時，回傳最小可用資料
         return code, stock_info, None, "fail"
 
-# --- 即時資料 (V118: 雙重確認) ---
+# --- 即時資料 (維持原樣，但增加對空值的保護) ---
 def get_realtime_data(df, code):
-    # 建立一個假的結構以免報錯
     fake_rt = {
         'latest_trade_price': 0, 'high': 0, 'low': 0, 'accumulate_trade_volume': 0,
         'previous_close': 0
@@ -167,23 +199,18 @@ def get_realtime_data(df, code):
             real = twstock.realtime.get(code)
             if real['success']:
                 rt = real['realtime']
-                
-                # 檢查資料有效性
                 if rt['latest_trade_price'] and rt['latest_trade_price'] != '-':
                     latest_price = float(rt['latest_trade_price'])
                     high = float(rt['high']) if rt['high'] != '-' else latest_price
                     low = float(rt['low']) if rt['low'] != '-' else latest_price
                     vol = float(rt['accumulate_trade_volume']) * 1000
                 else:
-                    # 如果盤中抓不到，可能是剛開盤或暫停，回傳歷史最後一筆
-                    if df is not None and not df.empty:
-                        return df, None, _make_fake_from_df(df)
+                    if df is not None and not df.empty: return df, None, _make_fake_from_df(df)
                     return df, None, fake_rt
             else:
                 if df is not None and not df.empty: return df, None, _make_fake_from_df(df)
                 return df, None, fake_rt
         else:
-            # 美股
             t = yf.Ticker(code)
             fast = t.fast_info
             if fast.last_price:
@@ -204,7 +231,6 @@ def get_realtime_data(df, code):
             'previous_close': df.iloc[-2]['Close'] if (df is not None and len(df)>1) else latest_price
         }
 
-        # 縫合到 DF
         new_df = df.copy() if df is not None else pd.DataFrame()
         
         if not new_df.empty:
@@ -214,19 +240,20 @@ def get_realtime_data(df, code):
             now_date = datetime.now(tz).date()
             last_date = last_idx.date()
             
+            # 如果是 GitHub 的資料 (通常較新)，或者日期一致，就進行更新
             if last_date < now_date:
-                # 新增
                 new_idx = pd.Timestamp(now_date)
                 new_row = pd.DataFrame([{
                     'Open': latest_price, 'High': high, 'Low': low, 'Close': latest_price, 'Volume': vol
                 }], index=[new_idx])
                 new_df = pd.concat([new_df, new_row])
             else:
-                # 更新
-                new_df.at[last_idx, 'Close'] = latest_price
-                new_df.at[last_idx, 'High'] = max(new_df.at[last_idx, 'High'], high)
-                new_df.at[last_idx, 'Low'] = min(new_df.at[last_idx, 'Low'], low)
-                new_df.at[last_idx, 'Volume'] = vol 
+                # 只有當盤中價格有效時才更新
+                if latest_price > 0:
+                    new_df.at[last_idx, 'Close'] = latest_price
+                    new_df.at[last_idx, 'High'] = max(new_df.at[last_idx, 'High'], high)
+                    new_df.at[last_idx, 'Low'] = min(new_df.at[last_idx, 'Low'], low)
+                    new_df.at[last_idx, 'Volume'] = vol 
         
         return new_df, None, rt_pack
 
@@ -243,7 +270,7 @@ def _make_fake_from_df(df):
         'previous_close': df.iloc[-2]['Close'] if len(df)>1 else latest['Open']
     }
 
-# ... (維持原樣) ...
+# ... (維持原樣的輔助函式) ...
 def get_color_settings(code): return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'}
 def save_scan_results(stype, codes):
     with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
