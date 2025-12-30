@@ -95,14 +95,12 @@ elif mode == 'analysis':
     code = st.session_state['current_stock']
     name = st.session_state['current_name']
     
-    # V110 修改：將控制開關放在迴圈外，避免 DuplicateElementId
-    col_head, col_tog = st.columns([4, 1])
-    with col_head:
-        st.subheader(f"{name} ({code})")
-    with col_tog:
-        monitor = st.toggle("🔴 1秒極速刷新", key="monitor_toggle")
-    
-    # 1. 抓取歷史 (Heavy)
+    # V110 修正：Toggle 移出迴圈
+    col_h, col_t = st.columns([3, 1])
+    with col_h: st.subheader(f"{name} ({code})")
+    with col_t: monitor = st.toggle("🔴 1秒極速刷新", key="monitor_toggle")
+
+    # 1. 抓取歷史 (Cache)
     fid, stock_info, df_hist, src = db.get_stock_data(code)
     
     main_placeholder = st.empty()
@@ -115,7 +113,7 @@ elif mode == 'analysis':
             df_display, _, rt_pack = db.get_realtime_data(df_hist, code)
             
             with main_placeholder.container():
-                # 顯示時間
+                # 時間字串
                 tz = timezone(timedelta(hours=8)) if m_type == 'TW' else timezone(timedelta(hours=-4))
                 now_str = datetime.now(tz).strftime('%H:%M:%S')
                 ui.render_header("", is_live=monitor, time_str=now_str)
@@ -139,7 +137,7 @@ elif mode == 'analysis':
                     
                     ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, "一般", vol_disp, vy, va, vs, 0, 0, None, None, rt_pack, unit=unit, code=code)
                     
-                    # 傳入動態 key
+                    # V110 修正：傳入 dynamic key 解決 DuplicateElementId
                     chart_key = f"chart_{code}_{int(time.time())}"
                     ui.render_chart(df_display, f"{name} K線圖", db.get_color_settings(code), key=chart_key)
                     
@@ -153,10 +151,8 @@ elif mode == 'analysis':
 
     ui.render_back_button(lambda: nav_to('welcome'))
 
-# (Scan, Learn 頁面代碼維持 V109 即可，這裡省略以節省篇幅)
-# 請務必保留 scan, learn 區塊！
 elif mode == 'scan':
-    # ... (請將上一版的 Scan 區塊完整複製貼上) ...
+    # (此部分完全保留，請參考上一輪回答，若您手上的版本已經正確則無需更動)
     stype = st.session_state['current_stock']
     target = st.session_state.get('scan_target_group', '全部')
     title_map = {'tomorrow_star': '🌅 明日之星', 'super_win': '💎 超強力必賺', 'day': '⚡ 強力當沖'}
@@ -229,7 +225,7 @@ elif mode == 'scan':
     ui.render_back_button(lambda: nav_to('welcome'))
 
 elif mode == 'learn':
-    ui.render_header("📖 股市新手村")
+    ui.render_header("📖 股市新手村 (終極詳解版)")
     t1, t2, t3 = st.tabs(["策略解密", "名詞百科", "K線戰法 SOP"])
     with t1: st.markdown(config.STRATEGY_DESC)
     with t2:
