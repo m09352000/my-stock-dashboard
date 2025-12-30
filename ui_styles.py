@@ -14,6 +14,8 @@ def inject_custom_css():
         .rank-norm { background-color: #333; color: #EEE; font-size: 1rem; width: 35px; height: 35px; }
         .status-tag { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85rem; text-align: center; display: inline-block; }
         .report-text { font-size: 1.05rem; line-height: 1.8; color: #E0E0E0; white-space: pre-wrap; }
+        .live-tag { color: #00FF00; font-weight: bold; font-size: 0.9rem; animation: blink 1s infinite; text-shadow: 0 0 5px #00FF00; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
         div[data-testid="stMetricValue"] { font-size: 1.35rem !important; font-weight: 800 !important; }
         hr.compact { margin: 8px 0px !important; border: 0; border-top: 1px solid #444; }
         </style>
