@@ -10,3 +10,5 @@ lxml
 yfinance
 deep-translator
 FinMind
+tqdm
+requests
