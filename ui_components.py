@@ -1,5 +1,5 @@
 # ui_components.py
-# 視覺元件庫：負責繪圖、卡片渲染、儀表板
+# 視覺元件庫
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -116,12 +116,12 @@ def render_chart(df, title, color_settings):
     fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1), name='20日線'), row=1, col=1)
     colors = ['#FF2B2B' if c >= o else '#00E050' for c, o in zip(df['Close'], df['Open'])]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=2, col=1)
-    fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10))
+    fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=10, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
 def render_ai_battle_dashboard(analysis):
     st.markdown("---")
-    st.subheader("🤖 AI 戰情診斷室 (V104 深度版)")
+    st.subheader("🤖 AI 戰情診斷室")
     c1, c2 = st.columns(2)
     with c1:
         w_prob = analysis.get('weekly_prob', 50)
