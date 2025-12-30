@@ -1,28 +1,25 @@
 # logic_database.py
-# V112: 資料核心 (中文翻譯 + 強力抓取版)
+# V113: 資料核心 (自動翻譯 + 即時同步修正)
 
 import pandas as pd
 import twstock
 import yfinance as yf
 import os
 import json
+import re
 import streamlit as st
 from datetime import datetime, timedelta, timezone
+
+# 嘗試引入翻譯套件，若無則降級處理
+try:
+    from deep_translator import GoogleTranslator
+    HAS_TRANSLATOR = True
+except ImportError:
+    HAS_TRANSLATOR = False
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
 COMMENTS_FILE = 'stock_comments.csv'
-
-# --- 中文化字典 ---
-TRANSLATION_MAP = {
-    "Technology": "科技業", "Financial Services": "金融業", "Healthcare": "醫療保健",
-    "Consumer Cyclical": "循環性消費", "Industrials": "工業", "Communication Services": "通訊服務",
-    "Consumer Defensive": "防禦性消費", "Energy": "能源", "Real Estate": "房地產",
-    "Basic Materials": "原物料", "Utilities": "公用事業",
-    "Semiconductors": "半導體", "Software - Infrastructure": "軟體基礎建設",
-    "Banks - Regional": "區域銀行", "Auto Manufacturers": "汽車製造",
-    "Internet Content & Information": "網際網路內容", "Consumer Electronics": "消費電子"
-}
 
 # --- 輔助函數 ---
 def _make_fake_rt(df):
@@ -36,7 +33,25 @@ def _make_fake_rt(df):
     }
 
 def translate_sector(text):
-    return TRANSLATION_MAP.get(text, text)
+    # 產業名詞簡單對照，提升速度
+    map_dict = {
+        "Technology": "科技業", "Financial Services": "金融業", "Healthcare": "醫療保健",
+        "Consumer Cyclical": "循環性消費", "Industrials": "工業", "Communication Services": "通訊服務",
+        "Consumer Defensive": "防禦性消費", "Energy": "能源", "Real Estate": "房地產",
+        "Basic Materials": "原物料", "Utilities": "公用事業", "Semiconductors": "半導體"
+    }
+    return map_dict.get(text, text)
+
+# V113: 真正的翻譯函式
+def translate_text(text):
+    if not text or text == "暫無資料": return text
+    if not HAS_TRANSLATOR: return text # 沒裝套件就回傳原文
+    try:
+        # 限制長度以免超時，並翻譯成繁體中文
+        translated = GoogleTranslator(source='auto', target='zh-TW').translate(text[:2000])
+        return translated
+    except:
+        return text
 
 # --- 資料庫初始化 ---
 def init_db():
@@ -54,7 +69,7 @@ def init_db():
         df.to_csv(COMMENTS_FILE, index=False)
 init_db()
 
-# --- 股票數據核心 (V112 優化抓取) ---
+# --- 股票數據核心 (歷史資料 Cache) ---
 @st.cache_data(ttl=300, show_spinner=False)
 def get_stock_data(code):
     try:
@@ -72,13 +87,12 @@ def get_stock_data(code):
             if code in twstock.codes: name = twstock.codes[code].name
             stock_info['name'] = name
             
-            # 優先嘗試 .TW，失敗則嘗試 .TWO
+            # 優先嘗試 .TW
             for suffix in ['.TW', '.TWO']:
                 try:
                     t = yf.Ticker(f"{code}{suffix}")
                     df = t.history(period="1y", interval="1d", auto_adjust=True)
                     if not df.empty:
-                        # 成功抓到資料，順便抓基本面
                         try:
                             info = t.info
                             stock_info['longBusinessSummary'] = info.get('longBusinessSummary', f"{name} 為台灣上市公司")
@@ -87,10 +101,9 @@ def get_stock_data(code):
                             stock_info['trailingEps'] = info.get('trailingEps', 0.0)
                             stock_info['trailingPE'] = info.get('trailingPE', 0.0)
                         except: pass
-                        break # 成功就跳出迴圈
+                        break 
                 except: continue
         else:
-            # 美股
             t = yf.Ticker(code)
             df = t.history(period="1y", interval="1d", auto_adjust=True)
             try:
@@ -104,11 +117,7 @@ def get_stock_data(code):
             except: pass
 
         if df.empty: return code, {}, None, "fail"
-        
-        # 時區校正
-        if df.index.tz is not None:
-            df.index = df.index.tz_localize(None)
-            
+        if df.index.tz is not None: df.index = df.index.tz_localize(None)
         if len(df) < 5: return code, {}, None, "fail"
 
         return code, stock_info, df, "yahoo"
@@ -116,6 +125,7 @@ def get_stock_data(code):
         print(f"History Error: {e}")
         return code, {}, None, "fail"
 
+# --- 即時資料 (V113: 強化同步邏輯) ---
 def get_realtime_data(df, code):
     if df is None or df.empty: return df, None, _make_fake_rt(df)
     try:
@@ -125,14 +135,19 @@ def get_realtime_data(df, code):
         latest_price = 0; high = 0; low = 0; vol = 0
         
         if is_tw:
+            # 台股：強制重新抓取
             real = twstock.realtime.get(code)
             if real['success']:
                 rt = real['realtime']
-                if rt['latest_trade_price'] != '-' and rt['latest_trade_price'] is not None:
+                # 確保數值有效
+                if rt['latest_trade_price'] and rt['latest_trade_price'] != '-':
                     latest_price = float(rt['latest_trade_price'])
-                    high = float(rt['high']); low = float(rt['low'])
+                    high = float(rt['high']) if rt['high'] != '-' else latest_price
+                    low = float(rt['low']) if rt['low'] != '-' else latest_price
                     vol = float(rt['accumulate_trade_volume']) * 1000
-                else: return df, None, _make_fake_rt(df)
+                else: 
+                    # 盤中偶爾抓不到，使用最佳買賣價估算，或沿用昨收
+                    return df, None, _make_fake_rt(df)
             else: return df, None, _make_fake_rt(df)
         else:
             t = yf.Ticker(code); fast = t.fast_info
@@ -143,6 +158,7 @@ def get_realtime_data(df, code):
                 vol = fast.last_volume if fast.last_volume else 0
             else: return df, None, _make_fake_rt(df)
 
+        # 智慧縫合
         new_df = df.copy()
         last_idx = df.index[-1]
         
@@ -151,17 +167,19 @@ def get_realtime_data(df, code):
         now_date = datetime.now(tz).date()
         last_date = last_idx.date()
         
+        # 修正：如果最新價跟歷史收盤價差異過大且日期相同，強制更新
         if last_date < now_date:
+            # 新的一天 -> 新增
             new_idx = pd.Timestamp(now_date)
             new_row = pd.DataFrame([{
-                'Open': latest_price, 'High': high if high > 0 else latest_price,
-                'Low': low if low > 0 else latest_price, 'Close': latest_price, 'Volume': vol
+                'Open': latest_price, 'High': high, 'Low': low, 'Close': latest_price, 'Volume': vol
             }], index=[new_idx])
             new_df = pd.concat([new_df, new_row])
         else:
+            # 同一天 -> 強制覆蓋，確保看到的是 39.00 而不是 39.25
             new_df.at[last_idx, 'Close'] = latest_price
-            if high > 0: new_df.at[last_idx, 'High'] = max(new_df.at[last_idx, 'High'], high)
-            if low > 0: new_df.at[last_idx, 'Low'] = min(new_df.at[last_idx, 'Low'], low)
+            new_df.at[last_idx, 'High'] = max(new_df.at[last_idx, 'High'], high)
+            new_df.at[last_idx, 'Low'] = min(new_df.at[last_idx, 'Low'], low)
             new_df.at[last_idx, 'Volume'] = vol 
         
         rt_pack = {
@@ -174,11 +192,7 @@ def get_realtime_data(df, code):
 def get_color_settings(code):
     return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'}
 
-def translate_text(text): 
-    # V112: 保留給未來的翻譯接口
-    return text
-
-# ... (維持原樣) ...
+# ... (其他輔助函數保持不變) ...
 def save_scan_results(stype, codes):
     with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
 def load_scan_results(stype):
