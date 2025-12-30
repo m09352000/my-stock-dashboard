@@ -94,9 +94,9 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
         chg_val = curr - prev; pct = (chg_val / prev) * 100
         if chg_val > 0: chg_color = "#FF2B2B"; pct_txt = f"▲{pct:.2f}%"
         elif chg_val < 0: chg_color = "#00E050"; pct_txt = f"▼{abs(pct):.2f}%"
-    rank_class = f"rank-{rank}" if rank and rank <= 3 else "rank-norm"
-    rank_content = f"{rank}" if rank else "-"
+    
     rank_html = f"<div class='rank-badge rank-{rank if rank and rank<=3 else 'norm'}'>{rank if rank else '-'}</div>"
+    
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns([0.6, 2.0, 1.2, 1.0])
         with c1: st.markdown(rank_html, unsafe_allow_html=True)
@@ -105,6 +105,7 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
         with c4:
             st.write(""); 
             if st.button("查看", key=f"{key_prefix}_{code}", use_container_width=True): return True
+
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         d1, d2 = st.columns([3, 1])
         with d1:
