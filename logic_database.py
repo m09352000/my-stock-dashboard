@@ -1,5 +1,5 @@
 # logic_database.py
-# V106: 資料核心 (極速快取架構)
+# 資料處理核心：負責抓取股票資料、快取機制
 
 import pandas as pd
 import twstock
@@ -7,7 +7,7 @@ import yfinance as yf
 import os
 import json
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -33,13 +33,12 @@ def init_db():
 
 init_db()
 
-# --- 股票數據核心 (V106: 加入快取機制) ---
-# 設定 TTL=300秒，代表歷史 K 線 5 分鐘更新一次即可，不需要每秒更新
+# --- 股票數據核心 (V107 修正版：防呆 + 快取) ---
+# 設定 TTL=300秒，歷史 K 線 5 分鐘更新一次即可
 @st.cache_data(ttl=300, show_spinner=False)
-def get_stock_data_history(code):
+def get_stock_data(code):
     """
-    抓取歷史 K 線資料 (Heavy Operation)
-    使用 Cache 機制，避免重複下載拖慢速度
+    抓取歷史 K 線資料 (Heavy Load, Cached)
     """
     try:
         code = str(code).upper().strip()
@@ -53,11 +52,9 @@ def get_stock_data_history(code):
             name = code
             if code in twstock.codes: name = twstock.codes[code].name
             fake_stock = FakeStockInfo(code, name)
-            # 台股歷史資料
             df = yf.download(f"{code}.TW", period="1y", interval="1d", progress=False)
             if df.empty: df = yf.download(f"{code}.TWO", period="1y", interval="1d", progress=False)
         else:
-            # 美股歷史資料
             fake_stock = FakeStockInfo(code, code) 
             try:
                 t = yf.Ticker(code); info = t.info
@@ -68,11 +65,7 @@ def get_stock_data_history(code):
             df = yf.download(code, period="1y", interval="1d", progress=False)
 
         if df.empty: return code, None, None, "fail"
-        
-        # 資料清洗
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-        
-        # 確保索引格式正確
         df.index = pd.to_datetime(df.index)
         
         if len(df) < 5: return code, None, None, "fail"
@@ -84,8 +77,7 @@ def get_stock_data_history(code):
 
 def get_realtime_data(df, code):
     """
-    抓取即時報價 (Light Operation)
-    這部分不快取，每次呼叫都拿最新的
+    抓取即時報價並與歷史資料縫合 (Light Load)
     """
     if df is None or df.empty: return df, None, None
     
@@ -95,7 +87,6 @@ def get_realtime_data(df, code):
         
         latest_price = 0; high = 0; low = 0; vol = 0
         
-        # 1. 抓取最新報價
         if is_tw:
             real = twstock.realtime.get(code)
             if real['success']:
@@ -115,49 +106,33 @@ def get_realtime_data(df, code):
                 vol = fast.last_volume if fast.last_volume else 0
             else: return _merge_fake_rt(df)
 
-        # 2. 將最新報價「縫合」進 DataFrame (V106 關鍵)
-        # 這樣畫圖時才會看到最新那根 K 棒在跳動
-        last_idx = df.index[-1]
-        now_date = datetime.now().date()
-        df_last_date = last_idx.date()
-        
-        # 如果最後一筆是今天的日期，直接更新；如果不是，新增一筆 (或者是 Yahoo 還沒收盤的狀況)
-        # 為了簡化與效能，我們直接更新最後一筆 (假設 Yahoo 有給出今天的開盤 K)
-        # 或是如果發現最新價與收盤價差異太大，代表是新的一天? 
-        # 簡單策略：直接用最新價覆蓋 Close, 更新 High/Low
-        
-        # 為了避免 SettingWithCopyWarning，使用 copy
+        # 縫合手術
         new_df = df.copy()
+        last_idx = df.index[-1]
         
         new_df.at[last_idx, 'Close'] = latest_price
         new_df.at[last_idx, 'High'] = max(new_df.at[last_idx, 'High'], high)
         new_df.at[last_idx, 'Low'] = min(new_df.at[last_idx, 'Low'], low)
-        new_df.at[last_idx, 'Volume'] = vol # 更新量
+        new_df.at[last_idx, 'Volume'] = vol 
         
         rt_pack = {
             'latest_trade_price': latest_price, 'high': high, 'low': low, 'accumulate_trade_volume': vol, 
             'previous_close': df.iloc[-2]['Close'] if len(df)>1 else df.iloc[-1]['Open']
         }
-        
         return new_df, None, rt_pack
-
-    except Exception as e:
-        print(f"Realtime Error: {e}")
-        return _merge_fake_rt(df)
+    except: return df, None, _make_fake_rt(df)
 
 def _merge_fake_rt(df):
     latest = df.iloc[-1]
     rt_pack = {
         'latest_trade_price': latest['Close'], 'high': latest['High'], 'low': latest['Low'],
-        'accumulate_trade_volume': latest['Volume'], 
-        'previous_close': df.iloc[-2]['Close'] if len(df)>1 else latest['Open']
+        'accumulate_trade_volume': latest['Volume'], 'previous_close': df.iloc[-2]['Close'] if len(df)>1 else latest['Open']
     }
     return df, None, rt_pack
 
 def get_color_settings(code):
     return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'}
 
-# --- 輔助函式 ---
 def translate_text(text): return text
 def save_scan_results(stype, codes):
     with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
