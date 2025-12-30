@@ -1,12 +1,12 @@
 # logic_database.py
-# V110: 資料核心 (修復 NameError 與 資料同步)
+# V111: 資料核心 (含基本面數據抓取)
 
 import pandas as pd
 import twstock
 import yfinance as yf
 import os
 import json
-import re  # <--- V110 修正：補上這個遺漏的 import
+import re
 import streamlit as st
 from datetime import datetime, timedelta, timezone
 
@@ -14,9 +14,8 @@ USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
 COMMENTS_FILE = 'stock_comments.csv'
 
-# --- 輔助函數 (定義在最上方以免找不到) ---
+# --- 輔助函數 ---
 def _make_fake_rt(df):
-    """當無法取得即時資料時，回傳歷史最後一筆作為備用"""
     if df is None or df.empty: return None
     latest = df.iloc[-1]
     return {
@@ -36,7 +35,6 @@ def init_db():
         except: users = {}
     users["admin"] = {"password": "admin888", "name": "超級管理員"}
     with open(USERS_FILE, 'w', encoding='utf-8') as f: json.dump(users, f, ensure_ascii=False)
-    
     if not os.path.exists(WATCHLIST_FILE):
         with open(WATCHLIST_FILE, 'w', encoding='utf-8') as f: json.dump({}, f)
     if not os.path.exists(COMMENTS_FILE):
@@ -44,53 +42,81 @@ def init_db():
         df.to_csv(COMMENTS_FILE, index=False)
 init_db()
 
-# --- 股票數據核心 (Cache 歷史資料) ---
+# --- 股票數據核心 (歷史資料 Cache) ---
 @st.cache_data(ttl=300, show_spinner=False)
 def get_stock_data(code):
     try:
         code = str(code).upper().strip()
         is_tw = code.isdigit() 
-        
-        # 使用字典 (Dict) 傳遞資訊，避免 Class Pickling Error
-        stock_info = {'name': code, 'code': code, 'longBusinessSummary': f"{code} - 資料來源: Yahoo Finance"}
+        # 預設資訊
+        stock_info = {
+            'name': code, 
+            'code': code, 
+            'longBusinessSummary': f"暫無 {code} 詳細描述",
+            'sector': "N/A", 
+            'industry': "N/A",
+            'trailingEps': 0.0, 
+            'trailingPE': 0.0
+        }
 
         if is_tw:
             name = code
             if code in twstock.codes: name = twstock.codes[code].name
             stock_info['name'] = name
-            stock_info['longBusinessSummary'] = f"{name} ({code}) - 台股資料"
-            df = yf.download(f"{code}.TW", period="1y", interval="1d", progress=False)
-            if df.empty: df = yf.download(f"{code}.TWO", period="1y", interval="1d", progress=False)
-        else:
+            
+            # 優先嘗試 .TW
+            ticker_tw = yf.Ticker(f"{code}.TW")
+            df = ticker_tw.history(period="1y", interval="1d")
+            
+            if df.empty:
+                ticker_tw = yf.Ticker(f"{code}.TWO")
+                df = ticker_tw.history(period="1y", interval="1d")
+            
+            # 嘗試抓取 Yahoo 的基本面 (台股有時會有)
             try:
-                t = yf.Ticker(code)
-                stock_info['name'] = code 
+                info = ticker_tw.info
+                stock_info['longBusinessSummary'] = info.get('longBusinessSummary', f"{name} 為台灣上市公司")
+                stock_info['sector'] = info.get('sector', '台股')
+                stock_info['industry'] = info.get('industry', '一般產業')
+                stock_info['trailingEps'] = info.get('trailingEps', 0.0)
+                stock_info['trailingPE'] = info.get('trailingPE', 0.0)
             except: pass
-            df = yf.download(code, period="1y", interval="1d", progress=False)
+
+        else:
+            # 美股
+            t = yf.Ticker(code)
+            try:
+                info = t.info
+                stock_info['name'] = info.get('longName', code)
+                stock_info['longBusinessSummary'] = info.get('longBusinessSummary', '美股企業資料')
+                stock_info['sector'] = info.get('sector', '美股')
+                stock_info['industry'] = info.get('industry', '科技/金融/傳產')
+                stock_info['trailingEps'] = info.get('trailingEps', 0.0)
+                stock_info['trailingPE'] = info.get('trailingPE', 0.0)
+            except: pass
+            df = t.history(period="1y", interval="1d")
 
         if df.empty: return code, {}, None, "fail"
         
-        # 資料清洗
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-        df.index = pd.to_datetime(df.index)
+        # yfinance history 回傳的 index 已經是 datetime，但帶有時區，需標準化
+        df.index = df.index.tz_localize(None)
         
         if len(df) < 5: return code, {}, None, "fail"
+
         return code, stock_info, df, "yahoo"
     except Exception as e:
         print(f"History Error: {e}")
         return code, {}, None, "fail"
 
-# --- 即時資料處理 (V110: 智慧縫合邏輯) ---
+# --- 即時資料 (每次都抓最新的) ---
 def get_realtime_data(df, code):
     if df is None or df.empty: return df, None, _make_fake_rt(df)
-    
     try:
         code = str(code).upper().strip()
         is_tw = code.isdigit()
         
         latest_price = 0; high = 0; low = 0; vol = 0
         
-        # 1. 抓取報價
         if is_tw:
             real = twstock.realtime.get(code)
             if real['success']:
@@ -110,34 +136,23 @@ def get_realtime_data(df, code):
                 vol = fast.last_volume if fast.last_volume else 0
             else: return df, None, _make_fake_rt(df)
 
-        # 2. 智慧縫合 (Smart Stitching)
-        # 判斷最後一筆資料的日期
+        # 智慧縫合
         new_df = df.copy()
         last_idx = df.index[-1]
+        
+        if is_tw: tz = timezone(timedelta(hours=8))
+        else: tz = timezone(timedelta(hours=-4))
+        now_date = datetime.now(tz).date()
         last_date = last_idx.date()
         
-        # 設定當下時間
-        if is_tw:
-            tz = timezone(timedelta(hours=8))
-            now_date = datetime.now(tz).date()
-        else:
-            tz = timezone(timedelta(hours=-4)) # 美東
-            now_date = datetime.now(tz).date()
-            
-        # 如果歷史資料停留在昨天 (或更早)，則新增一筆今天的 K 棒
         if last_date < now_date:
             new_idx = pd.Timestamp(now_date)
-            # 建立新的一行 DataFrame
-            new_row_df = pd.DataFrame([{
-                'Open': latest_price, # 暫用最新價當開盤
-                'High': high if high > 0 else latest_price,
-                'Low': low if low > 0 else latest_price,
-                'Close': latest_price,
-                'Volume': vol
+            new_row = pd.DataFrame([{
+                'Open': latest_price, 'High': high if high > 0 else latest_price,
+                'Low': low if low > 0 else latest_price, 'Close': latest_price, 'Volume': vol
             }], index=[new_idx])
-            new_df = pd.concat([new_df, new_row_df])
+            new_df = pd.concat([new_df, new_row])
         else:
-            # 還是同一天，更新最後一筆
             new_df.at[last_idx, 'Close'] = latest_price
             if high > 0: new_df.at[last_idx, 'High'] = max(new_df.at[last_idx, 'High'], high)
             if low > 0: new_df.at[last_idx, 'Low'] = min(new_df.at[last_idx, 'Low'], low)
@@ -148,14 +163,16 @@ def get_realtime_data(df, code):
             'previous_close': df.iloc[-2]['Close'] if len(df)>1 else df.iloc[-1]['Open']
         }
         return new_df, None, rt_pack
-    except Exception as e:
-        print(f"RT Error: {e}")
-        return df, None, _make_fake_rt(df)
+    except: return df, None, _make_fake_rt(df)
 
 def get_color_settings(code):
     return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'}
 
-def translate_text(text): return text
+def translate_text(text): 
+    # 簡單翻譯映射 (如果是英文財報) - 這裡可接 Google Translate API 但為求穩定先保留原樣
+    return text
+
+# ... (其他輔助函數 save_scan_results, solve_stock_id 等維持 V110 不變) ...
 def save_scan_results(stype, codes):
     with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
 def load_scan_results(stype):
@@ -171,8 +188,6 @@ def save_comment(user, msg):
 def get_comments():
     if os.path.exists(COMMENTS_FILE): return pd.read_csv(COMMENTS_FILE)
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
-
-# 搜尋邏輯 (V110: 使用 re)
 def solve_stock_id(val):
     val = str(val).strip().upper()
     if not val: return None, None
