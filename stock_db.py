@@ -8,7 +8,7 @@ from deep_translator import GoogleTranslator
 from FinMind.data import DataLoader
 import streamlit as st
 
-# --- V95: 混合雙引擎核心 (FinMind 節流版 + Yahoo 穩定版) ---
+# --- V96.1: 混合雙引擎核心 (含 RateLimit 防護盾) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -23,7 +23,6 @@ def init_db():
                 users = json.load(f)
         except: users = {}
     
-    # 強制重置管理員
     users["admin"] = {"password": "admin888", "name": "超級管理員"}
     
     with open(USERS_FILE, 'w', encoding='utf-8') as f:
@@ -96,13 +95,12 @@ def get_stock_data(code):
     try:
         ticker = None
         df = pd.DataFrame()
-        # 自動判斷上市(.TW) 或上櫃(.TWO)
         candidates = [f"{code}.TW", f"{code}.TWO"] if code.isdigit() else [code]
             
         for c in candidates:
             try:
                 temp_ticker = yf.Ticker(c)
-                temp_df = temp_ticker.history(period="6mo") # 抓半年以計算 MA60
+                temp_df = temp_ticker.history(period="6mo")
                 if not temp_df.empty:
                     ticker = temp_ticker
                     df = temp_df
@@ -120,40 +118,38 @@ def get_stock_data(code):
     except Exception as e:
         return code, None, None, "fail"
 
+# --- V96.1 新增: 基本面資料快取 (關鍵修復 Rate Limit) ---
+@st.cache_data(ttl=86400) # 快取 24 小時
+def get_info_data(symbol):
+    try:
+        # 使用新的 Ticker 物件獲取 info，避免 session 汙染
+        return yf.Ticker(symbol).info
+    except Exception as e:
+        print(f"Info Fetch Error: {e}")
+        return {}
+
 # --- V95: 智能籌碼抓取 (FinMind + Cache) ---
-@st.cache_data(ttl=3600) # 關鍵：快取 1 小時，避免爆流量
+@st.cache_data(ttl=3600)
 def get_chip_data(stock_id):
     try:
-        if not stock_id.isdigit(): return None # 美股無籌碼
-        
+        if not stock_id.isdigit(): return None
         dl = DataLoader()
-        # 抓取最近 15 天 (確保有資料)
         start_date = (datetime.now() - timedelta(days=15)).strftime('%Y-%m-%d')
-        
-        df_inst = dl.taiwan_stock_institutional_investors(
-            stock_id=stock_id, 
-            start_date=start_date
-        )
+        df_inst = dl.taiwan_stock_institutional_investors(stock_id=stock_id, start_date=start_date)
         
         chip_data = {"foreign": 0, "trust": 0, "dealer": 0, "date": ""}
-        
         if not df_inst.empty:
-            # 取最近一天的資料
             latest_date = df_inst['date'].max()
             df_last = df_inst[df_inst['date'] == latest_date]
-            
             chip_data["date"] = latest_date
-            
             for _, row in df_last.iterrows():
-                net = (row['buy'] - row['sell']) / 1000 # 換算張數
+                net = (row['buy'] - row['sell']) / 1000
                 if row['name'] == 'Foreign_Investor': chip_data['foreign'] = int(net)
                 elif row['name'] == 'Investment_Trust': chip_data['trust'] = int(net)
                 elif row['name'] == 'Dealer_Self': chip_data['dealer'] += int(net)
                 elif row['name'] == 'Dealer_Hedging': chip_data['dealer'] += int(net)
-
         return chip_data
-    except:
-        return None
+    except: return None
 
 def get_color_settings(code):
     return {'up': 'red', 'down': 'green', 'delta': 'inverse'}
@@ -179,7 +175,7 @@ def get_comments():
     if os.path.exists(COMMENTS_FILE): return pd.read_csv(COMMENTS_FILE)
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
 
-# --- 7. 翻譯功能 (V94+ 中文化) ---
+# --- 7. 翻譯功能 ---
 def translate_text(text):
     if not text or text == "暫無詳細描述": return "暫無詳細描述"
     try:
