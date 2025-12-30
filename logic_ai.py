@@ -1,10 +1,9 @@
 # logic_ai.py
-# V112: AI 核心層 (語言邏輯優化版)
+# V112: AI 核心 (全中文深度分析)
 
 import pandas as pd
 
 def generate_detailed_report(df, score, weekly_prob, monthly_prob):
-    """生成深度報告 (優化語氣)"""
     latest = df.iloc[-1]
     p = latest['Close']
     m5 = df['Close'].rolling(5).mean().iloc[-1]
@@ -13,26 +12,26 @@ def generate_detailed_report(df, score, weekly_prob, monthly_prob):
     vol = latest['Volume']
     vol_ma5 = df['Volume'].rolling(5).mean().iloc[-1]
     
-    trend_txt = "【趨勢分析】\n"
+    trend_txt = "【📊 趨勢技術面】\n"
     if p > m5 and m5 > m20 and m20 > m60:
-        trend_txt += "✅ **多頭強勢進攻**：股價站穩所有均線之上，形成完美的多頭排列。這通常是主升段的特徵，上方無明顯套牢壓力，適合順勢操作。"
+        trend_txt += "🚀 **多頭強勢排列**：股價站穩所有均線之上，且 5日 > 20日 > 60日，這是最標準的主升段架構。上方萬里無雲，適合順勢加碼。"
     elif p < m5 and m5 < m20 and m20 < m60:
-        trend_txt += "⚠️ **空頭修正格局**：股價遭均線層層反壓，趨勢向下。目前仍處於修正階段，建議耐心等待底部型態出現，勿貿然接刀。"
+        trend_txt += "📉 **空頭修正格局**：股價位於所有均線之下，且均線下彎形成蓋頭反壓。目前趨勢向下，切勿猜底，建議觀望。"
     elif p > m20:
-        trend_txt += "🌤️ **多方掌控節奏**：股價穩守月線(生命線)之上，屬於中多格局。短線若有震盪回檔，只要不破月線，波段多單可續抱。"
+        trend_txt += "🌤️ **多方掌控節奏**：股價穩守月線(20MA 生命線)之上，中多格局未變。短線震盪視為清洗浮額，只要月線不破，波段趨勢依然向上。"
     else:
-        trend_txt += "🌧️ **整理待變**：股價跌破月線，短線動能轉弱。目前進入整理期，需觀察能否儘快站回月線，否則整理時間將拉長。"
+        trend_txt += "🌧️ **轉弱整理**：股價跌破月線，短線動能轉弱。需觀察能否在季線(60MA)附近獲得支撐，否則整理時間將拉長。"
 
-    vol_txt = "\n\n【籌碼與量能】\n"
+    vol_txt = "\n\n【💸 籌碼與量能】\n"
     if vol > vol_ma5 * 1.8:
-        vol_txt += f"🔥 **爆量攻擊**：今日成交量放大至五日均量的 {vol/vol_ma5:.1f} 倍！這代表主力大戶態度積極，有新資金進場換手，有利行情延續。"
+        vol_txt += f"🔥 **爆量攻擊**：今日成交量放大至五日均量的 {vol/vol_ma5:.1f} 倍！代表主力大戶態度積極，有新資金進場換手，是強烈的攻擊訊號。"
     elif vol < vol_ma5 * 0.6:
-        vol_txt += "❄️ **量縮觀望**：今日成交量明顯萎縮，市場觀望氣氛濃厚，買賣雙方都在縮手，等待進一步的方向確認。"
+        vol_txt += "❄️ **量縮觀望**：成交量明顯萎縮，市場觀望氣氛濃厚。在多頭回檔時量縮是好事(惜售)，但在跌勢中則代表沒人敢接。"
     else:
         vol_txt += "⚖️ **量價平穩**：成交量維持在均量附近，屬於健康的換手量，有利於股價穩步推升。"
 
-    prob_txt = "\n\n【AI 獲利機率預測】\n"
-    prob_txt += f"● **短線 (本週)**：勝率 **{weekly_prob}%**。{( '🚀 極高！建議積極操作。' if weekly_prob > 80 else '⚠️ 波動較大，需設好停損。' )}\n"
+    prob_txt = "\n\n【🎯 AI 獲利機率預測】\n"
+    prob_txt += f"● **短線 (本週)**：勝率 **{weekly_prob}%**。{( '🔥 極高！建議積極尋找買點。' if weekly_prob > 80 else '⚠️ 波動風險大，嚴設停損。' )}\n"
     prob_txt += f"● **波段 (本月)**：勝率 **{monthly_prob}%**。{( '💎 趨勢穩健，適合波段持有。' if monthly_prob > 70 else '⏳ 趨勢不明，建議觀望。' )}"
 
     return trend_txt + vol_txt + prob_txt
@@ -58,7 +57,7 @@ def generate_scan_reason(df):
     rsi = (100 - 100/(1+rs)).iloc[-1]
 
     if p > m5 and m5 > m20 and m20 > m60: reasons.append("均線多頭排列")
-    elif p > m20 and m20 > m60: reasons.append("站穩月季線")
+    elif p > m20 and m20 > m60: reasons.append("站穩季線翻多")
     elif p > m5 and p > m20: reasons.append("短線轉強")
     
     if vol > vol_ma5 * 2.0: reasons.append(f"爆量{vol/vol_ma5:.1f}倍")
@@ -70,7 +69,7 @@ def generate_scan_reason(df):
     if 50 < rsi < 75: reasons.append(f"RSI強勢({int(rsi)})")
     elif rsi < 20: reasons.append("RSI超賣反彈")
     
-    if p > df['High'].iloc[-1] * 0.99: reasons.append("收盤收最高")
+    if p > df['High'].iloc[-1] * 0.99: reasons.append("收最高")
     
     if not reasons: return "技術面整理中"
     return " + ".join(reasons[:3])
