@@ -127,7 +127,7 @@ def get_chip_data(stock_id):
         if not stock_id.isdigit(): return None # 美股無籌碼
         
         dl = DataLoader()
-        # 抓取最近 10 天 (確保有資料)
+        # 抓取最近 15 天 (確保有資料)
         start_date = (datetime.now() - timedelta(days=15)).strftime('%Y-%m-%d')
         
         df_inst = dl.taiwan_stock_institutional_investors(
