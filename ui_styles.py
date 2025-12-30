@@ -5,6 +5,13 @@ def inject_custom_css():
     st.markdown("""
         <style>
         .stApp { font-family: "Microsoft JhengHei", sans-serif; }
+        
+        /* V113 關鍵：消除頂部空白 */
+        .block-container {
+            padding-top: 1rem !important;
+            padding-bottom: 1rem !important;
+        }
+        
         .battle-card { background-color: #1e1e1e; padding: 20px; border-radius: 12px; border: 1px solid #333; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         .battle-title { font-size: 1.2rem; font-weight: 900; color: #fff; margin-bottom: 10px; border-bottom: 2px solid #444; padding-bottom: 5px; }
         .rank-badge { display: flex; align-items: center; justify-content: center; width: 45px; height: 45px; border-radius: 50%; font-weight: 900; font-size: 1.4rem; color: #000; margin: auto; box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
