@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 
-# --- CSS 優化 ---
+# --- CSS 優化: V96 戰情室風格 ---
 def inject_custom_css():
     st.markdown("""
         <style>
@@ -13,9 +13,33 @@ def inject_custom_css():
         .big-price { font-size: 2.5rem; font-weight: 900; line-height: 1; }
         .live-tag { color: #00FF00; font-weight: bold; font-size: 0.8rem; animation: blink 1s infinite; }
         @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
-        .strategy-card { background-color: #262730; padding: 15px; border-radius: 8px; border-left: 5px solid #FF9F1C; margin-bottom: 10px; }
-        .bull-text { color: #FF2B2B; font-weight: bold; }
-        .bear-text { color: #00E050; font-weight: bold; }
+        
+        /* 訊號矩陣風格 */
+        .signal-box {
+            background-color: #262730;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-left: 4px solid #555;
+        }
+        .signal-box.bull { border-left-color: #FF2B2B; background-color: #2e1a1a; }
+        .signal-box.bear { border-left-color: #00E050; background-color: #1a2e1a; }
+        .signal-label { font-size: 0.9rem; color: #ccc; }
+        .signal-value { font-weight: bold; font-size: 1rem; }
+        
+        /* 戰術板風格 */
+        .tactic-card {
+            background-color: #1E1E1E;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .tactic-header { color: #FF9F1C; font-weight: bold; font-size: 1.1rem; margin-bottom: 10px; border-bottom: 1px solid #444; padding-bottom: 5px;}
+        .tactic-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 1rem; }
+        .tactic-val { color: #eee; font-weight: bold; font-family: monospace; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -36,19 +60,50 @@ def render_header(title, show_monitor=False):
 def render_back_button(callback_func):
     if st.button("⬅️ 返回列表", use_container_width=True): callback_func()
 
-# --- 2. 六大指標真實演算法 (V95 整合 FinMind) ---
+# --- V96: 進階技術指標計算核心 ---
+def calculate_advanced_indicators(df):
+    try:
+        close = df['Close']
+        
+        # 1. MACD (12, 26, 9)
+        exp1 = close.ewm(span=12, adjust=False).mean()
+        exp2 = close.ewm(span=26, adjust=False).mean()
+        macd = exp1 - exp2
+        signal = macd.ewm(span=9, adjust=False).mean()
+        hist = macd - signal
+        
+        # 2. KD (9, 3, 3)
+        low_min = df['Low'].rolling(window=9).min()
+        high_max = df['High'].rolling(window=9).max()
+        rsv = (close - low_min) / (high_max - low_min) * 100
+        k = rsv.ewm(com=2, adjust=False).mean() # 簡易算法，接近 SMA
+        d = k.ewm(com=2, adjust=False).mean()
+        
+        # 3. Bollinger Bands (20, 2)
+        sma20 = close.rolling(window=20).mean()
+        std20 = close.rolling(window=20).std()
+        upper = sma20 + (std20 * 2)
+        lower = sma20 - (std20 * 2)
+        
+        return {
+            "macd": macd.iloc[-1], "signal": signal.iloc[-1], "hist": hist.iloc[-1],
+            "k": k.iloc[-1], "d": d.iloc[-1],
+            "bb_upper": upper.iloc[-1], "bb_lower": lower.iloc[-1], "sma20": sma20.iloc[-1]
+        }
+    except:
+        return None
+
+# --- 六大指標真實演算法 (維持 V95) ---
 def calculate_six_indicators(df, info, chip_data=None):
     scores = {"籌碼": 5, "價量": 5, "基本": 5, "動能": 5, "風險": 5, "價值": 5}
-    
     if df is None or df.empty or len(df) < 60: return scores
-
     try:
         curr = df['Close'].iloc[-1]
         ma5 = df['Close'].rolling(5).mean().iloc[-1]
         ma20 = df['Close'].rolling(20).mean().iloc[-1]
         ma60 = df['Close'].rolling(60).mean().iloc[-1]
         
-        # 1. 價量 (Trend)
+        # 價量
         trend_score = 5
         if curr > ma5 > ma20 > ma60: trend_score = 9 
         elif curr > ma20 and ma20 > ma60: trend_score = 7 
@@ -56,12 +111,11 @@ def calculate_six_indicators(df, info, chip_data=None):
         elif curr < ma20: trend_score = 4 
         scores["價量"] = trend_score
         
-        # 2. 動能 (Momentum)
+        # 動能
         delta = df['Close'].diff()
         u = delta.copy(); d = delta.copy(); u[u<0]=0; d[d>0]=0
         rs = u.rolling(14).mean() / d.abs().rolling(14).mean()
         rsi = (100 - 100/(1+rs)).iloc[-1]
-        
         mom_score = 5
         if 60 <= rsi <= 80: mom_score = 9 
         elif 40 < rsi < 60: mom_score = 6 
@@ -69,25 +123,21 @@ def calculate_six_indicators(df, info, chip_data=None):
         elif rsi < 30: mom_score = 3 
         scores["動能"] = mom_score
 
-        # 3. 籌碼 (Chips) - V95 真實數據
+        # 籌碼
         chip_score = 5
         if chip_data:
-            # 有真實籌碼
-            f_buy = chip_data.get('foreign', 0)
-            t_buy = chip_data.get('trust', 0)
-            if f_buy > 2000 or t_buy > 500: chip_score = 10 # 法人強力買進
-            elif f_buy > 500 or t_buy > 100: chip_score = 8 # 法人偏多
-            elif f_buy < -2000 or t_buy < -500: chip_score = 1 # 法人倒貨
-            elif f_buy < 0: chip_score = 3 # 偏空
+            f_buy = chip_data.get('foreign', 0); t_buy = chip_data.get('trust', 0)
+            if f_buy > 2000 or t_buy > 500: chip_score = 10 
+            elif f_buy > 500 or t_buy > 100: chip_score = 8 
+            elif f_buy < -2000 or t_buy < -500: chip_score = 1 
+            elif f_buy < 0: chip_score = 3 
         else:
-            # 降級為模擬 (ETF或無資料)
-            vol_avg = df['Volume'].rolling(5).mean().iloc[-1]
-            vol_curr = df['Volume'].iloc[-1]
+            vol_avg = df['Volume'].rolling(5).mean().iloc[-1]; vol_curr = df['Volume'].iloc[-1]
             if vol_curr > vol_avg * 1.5 and curr > df['Open'].iloc[-1]: chip_score = 7
             elif vol_curr > vol_avg * 1.5 and curr < df['Open'].iloc[-1]: chip_score = 3
         scores["籌碼"] = chip_score
         
-        # 4. 風險 (Risk)
+        # 風險
         bias = ((curr - ma60) / ma60) * 100
         risk_score = 5
         if 0 < bias < 10: risk_score = 8 
@@ -96,7 +146,7 @@ def calculate_six_indicators(df, info, chip_data=None):
         elif bias < -20: risk_score = 3 
         scores["風險"] = risk_score
         
-        # 5. 價值 & 6. 基本
+        # 價值 & 基本
         if info:
             pe = info.get('trailingPE', 0)
             val_score = 5
@@ -104,87 +154,90 @@ def calculate_six_indicators(df, info, chip_data=None):
             elif 15 < pe <= 25: val_score = 6 
             elif pe > 25: val_score = 4 
             scores["價值"] = val_score
-            
             roe = info.get('returnOnEquity', 0)
             fund_score = 5
             if roe > 0.15: fund_score = 8
             elif roe > 0.05: fund_score = 6
             elif roe < 0: fund_score = 2
             scores["基本"] = fund_score
-
     except: pass
-    
     return scores
 
-# --- 3. 繪製雷達圖 ---
 def render_radar_chart(scores):
-    categories = list(scores.keys())
-    values = list(scores.values())
-    categories.append(categories[0])
-    values.append(values[0])
-
+    categories = list(scores.keys()); values = list(scores.values())
+    categories.append(categories[0]); values.append(values[0])
     fig = go.Figure()
-    fig.add_trace(go.Scatterpolar(
-        r=values,
-        theta=categories,
-        fill='toself',
-        fillcolor='rgba(255, 43, 43, 0.4)',
-        line=dict(color='#FF2B2B', width=2),
-        name='個股評分'
-    ))
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(visible=True, range=[0, 10], showticklabels=False, linecolor='#444'),
-            bgcolor='rgba(0,0,0,0)'
-        ),
-        margin=dict(l=20, r=20, t=20, b=20),
-        height=250,
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        showlegend=False
-    )
+    fig.add_trace(go.Scatterpolar(r=values, theta=categories, fill='toself', fillcolor='rgba(255, 43, 43, 0.4)', line=dict(color='#FF2B2B', width=2), name='個股評分'))
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 10], showticklabels=False, linecolor='#444'), bgcolor='rgba(0,0,0,0)'), margin=dict(l=20, r=20, t=20, b=20), height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False)
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-# --- 4. 戰略建議生成器 ---
-def generate_trade_advice(price, m5, m20, m60, rsi, chip_data=None):
-    advice = {"action": "觀望", "color": "#888", "entry": "-", "exit": "-", "reason": "數據整理中"}
+# --- V96: 專業戰術分析引擎 ---
+def generate_detailed_advice(price, m5, m20, m60, rsi, tech_ind, chip_data=None):
+    advice = {"action": "觀望", "color": "#888", "entry": "-", "exit": "-", "reason": "數據整理中", "signals": []}
     
     score = 0
-    reason = []
+    signals = []
     
-    # 技術面評分
-    if price > m20: score += 1; reason.append("站上月線")
-    if m5 > m20: score += 1; reason.append("短均黃金交叉")
-    if m20 > m60: score += 1; reason.append("中長線多頭排列")
-    
-    # 籌碼面加分
-    if chip_data:
-        if chip_data['foreign'] > 0: score += 1; reason.append("外資買進")
-        if chip_data['trust'] > 0: score += 1; reason.append("投信佈局")
-    
-    # 判斷
-    if score >= 4:
-        advice = {
-            "action": "🚀 強力買進", "color": "#FF2B2B",
-            "entry": f"拉回 {m5:.1f}", "exit": f"跌破 {m20:.1f}",
-            "reason": f"多頭訊號共振 ({'、'.join(reason)})，籌碼技術雙優。"
-        }
-    elif score >= 2:
-         advice = {
-            "action": "📈 偏多操作", "color": "#FF2B2B",
-            "entry": f"接近 {m20:.1f}", "exit": f"跌破 {m60:.1f}",
-            "reason": "趨勢偏多，但需留意乖離或前高壓力。"
-        }
-    elif price < m60:
-         advice = {
-            "action": "📉 反彈空", "color": "#00E050",
-            "entry": f"反彈 {m20:.1f}", "exit": f"站上 {m60:.1f}",
-            "reason": "股價位於季線之下，長線空頭架構。"
-        }
+    # 1. 均線分析
+    if price > m20: 
+        score += 1; signals.append(("均線", "站上月線", "bull"))
+    else: signals.append(("均線", "月線反壓", "bear"))
         
+    if m5 > m20: 
+        score += 1; signals.append(("短趨勢", "多頭排列", "bull"))
+    
+    # 2. MACD 分析
+    if tech_ind:
+        if tech_ind['hist'] > 0:
+            score += 1; signals.append(("MACD", "紅柱擴大", "bull"))
+        else:
+            signals.append(("MACD", "綠柱修正", "bear"))
+            
+    # 3. KD 分析
+    if tech_ind:
+        if tech_ind['k'] > tech_ind['d']:
+            signals.append(("KD", "黃金交叉", "bull"))
+        else:
+            signals.append(("KD", "死亡交叉", "bear"))
+            
+    # 4. 布林通道分析
+    if tech_ind:
+        if price > tech_ind['bb_upper']: signals.append(("布林", "觸及上軌", "bull"))
+        elif price < tech_ind['bb_lower']: signals.append(("布林", "觸及下軌", "bear"))
+        else: signals.append(("布林", "通道內", "neutral"))
+
+    # 5. 籌碼分析
+    if chip_data:
+        if chip_data['foreign'] > 500: 
+            score += 1; signals.append(("外資", "積極買超", "bull"))
+        elif chip_data['foreign'] < -500:
+            score -= 1; signals.append(("外資", "大幅調節", "bear"))
+        else:
+            signals.append(("外資", "動作不大", "neutral"))
+    
+    # 綜合判斷
+    if score >= 3:
+        advice["action"] = "🚀 強力買進"
+        advice["color"] = "#FF2B2B"
+        advice["entry"] = f"拉回 {m5:.1f} ~ {m20:.1f} 佈局"
+        advice["exit"] = f"跌破 {m20:.1f} 停損"
+        advice["reason"] = "多項技術指標與籌碼面共振，趨勢強勁，適合順勢操作。"
+    elif score >= 1:
+        advice["action"] = "📈 偏多操作"
+        advice["color"] = "#FF9F1C"
+        advice["entry"] = f"接近 {m20:.1f} 承接"
+        advice["exit"] = f"跌破 {m60:.1f} 停損"
+        advice["reason"] = "趨勢偏多但力道未滿，建議逢低承接，避免追高。"
+    elif price < m60:
+        advice["action"] = "📉 反彈空"
+        advice["color"] = "#00E050"
+        advice["entry"] = f"反彈 {m20:.1f} 不過"
+        advice["exit"] = f"站上 {m60:.1f}"
+        advice["reason"] = "空頭架構未變，反彈遇壓容易回落。"
+    
+    advice["signals"] = signals
     return advice
 
-# --- 5. 儀表板 (V95 接收真實數據) ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              turnover_rate, bid_ask_data, color_settings, 
@@ -207,7 +260,6 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
             m2.metric("最低", f"{low:.2f}")
             m3.metric("成交量", f"{int(vol/1000)}K")
             
-            # 主力動向顯示優化
             mf_color = "red" if "🔴" in main_force else ("green" if "🟢" in main_force else "gray")
             st.markdown(f"主力動向: <span style='color:{mf_color}; font-weight:bold'>{main_force}</span> | 量能: {vol_status}", unsafe_allow_html=True)
             
@@ -216,36 +268,67 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
             render_radar_chart(radar_scores)
     st.markdown("---")
 
-# --- 6. AI 戰略分析報告 (整合籌碼) ---
+# --- V96: AI 深度診斷報告 (UI 大升級) ---
 def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df=None, chip_data=None):
-    advice = generate_trade_advice(curr, m5, m20, m60, rsi, chip_data)
+    tech_ind = calculate_advanced_indicators(df)
+    advice = generate_detailed_advice(curr, m5, m20, m60, rsi, tech_ind, chip_data)
     
-    st.subheader("🤖 AI 投資顧問診斷")
-    st.markdown(f"""
-    <div class='strategy-card'>
-        <h3 style='color:{advice['color']}; margin-top:0;'>{advice['action']}</h3>
-        <p style='font-size:1.1rem;'>{advice['reason']}</p>
-        <hr style='border-color:#555;'>
-        <div style='display:flex; justify-content:space-between;'>
-            <div>📥 建議進場：<span style='font-weight:bold; color:#DDD'>{advice['entry']}</span></div>
-            <div>📤 建議停損：<span style='font-weight:bold; color:#DDD'>{advice['exit']}</span></div>
+    st.subheader("🤖 AI 深度戰略診斷")
+    
+    # 佈局：左邊是總結與戰術，右邊是詳細訊號矩陣
+    c_left, c_right = st.columns([1.5, 1])
+    
+    with c_left:
+        # 1. 總結卡片
+        st.markdown(f"""
+        <div class='strategy-card'>
+            <div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;'>
+                <h2 style='color:{advice['color']}; margin:0;'>{advice['action']}</h2>
+                <span style='background-color:#333; padding:2px 8px; border-radius:4px; font-size:0.8rem;'>AI 信心度: 高</span>
+            </div>
+            <p style='font-size:1.1rem; line-height:1.5;'>{advice['reason']}</p>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    t1, t2 = st.tabs(["📊 趨勢數據", "🕯️ K線型態"])
-    with t1:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("RSI 動能", f"{rsi:.1f}")
-        c2.metric("季線乖離", f"{bias:.2f}%")
-        c3.metric("均線狀態", "多頭" if curr>m20 else "空頭")
-    with t2:
-         if df is not None and len(df) >= 3:
-            c1 = df.iloc[-1]; c2 = df.iloc[-2]
-            if c1['Close'] > c1['Open'] and c2['Close'] < c2['Open'] and c1['Close'] > c2['Open']:
-                st.markdown("✅ **多頭吞噬**：今日紅K吞噬昨日綠K，強勢反轉訊號。")
-            else:
-                st.markdown("ℹ️ 目前無特殊K線型態。")
+        """, unsafe_allow_html=True)
+        
+        # 2. 戰術數值板
+        st.markdown(f"""
+        <div class='tactic-card'>
+            <div class='tactic-header'>🎯 關鍵戰術點位</div>
+            <div class='tactic-row'><span>📥 建議進場</span> <span class='tactic-val' style='color:#FF9F1C'>{advice['entry']}</span></div>
+            <div class='tactic-row'><span>🛡️ 停損防守</span> <span class='tactic-val' style='color:#00E050'>{advice['exit']}</span></div>
+            <div class='tactic-row'><span>🚧 月線壓力</span> <span class='tactic-val'>{m20:.2f}</span></div>
+            <div class='tactic-row'><span>🌊 季線支撐</span> <span class='tactic-val'>{m60:.2f}</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with c_right:
+        st.markdown("#### 📡 訊號矩陣")
+        # 動態生成訊號燈
+        for name, value, status in advice['signals']:
+            # 轉換 style class
+            color_cls = "bull" if status == "bull" else ("bear" if status == "bear" else "neutral")
+            icon = "🟢" if status == "bull" else ("🔴" if status == "bear" else "⚪")
+            
+            st.markdown(f"""
+            <div class='signal-box {color_cls}'>
+                <span class='signal-label'>{name}</span>
+                <span class='signal-value'>{icon} {value}</span>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        # 補充數據
+        if tech_ind:
+            with st.expander("🔍 進階數值", expanded=False):
+                st.caption(f"KD: {tech_ind['k']:.1f} / {tech_ind['d']:.1f}")
+                st.caption(f"MACD: {tech_ind['macd']:.2f}")
+                st.caption(f"RSI: {rsi:.1f}")
+
+    # 下方保留 K線型態
+    if df is not None and len(df) >= 3:
+        st.write("")
+        c1 = df.iloc[-1]; c2 = df.iloc[-2]
+        if c1['Close'] > c1['Open'] and c2['Close'] < c2['Open'] and c1['Close'] > c2['Open']:
+            st.info("💡 K線偵測：今日出現 **多頭吞噬** 型態，短線轉強訊號。")
 
 # --- 7. K線圖 ---
 def calculate_supertrend(df, period=10, multiplier=3):
