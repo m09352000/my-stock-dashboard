@@ -6,9 +6,9 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import ui_styles
 
-def render_header(title, is_live=False, time_str=""):
+def render_header(title, show_monitor=False, is_live=False, time_str=""):
     """
-    V110: Header 只負責顯示，控制權移交給 main.py
+    V110: Header 介面，支援外部傳入時間字串
     """
     ui_styles.inject_custom_css()
     c1, c2 = st.columns([3, 1])
@@ -64,12 +64,10 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         d1, d2, d3, d4 = st.columns(4)
         d1.metric("振幅", f"{amp:.2f}%"); d2.metric("量能狀態", vs)
-        
         va_val = va if unit=="股" else va/1000
         va_str = f"{int(va_val):,}"
         if unit == "股" and va_val > 1000000: va_str = f"{va_val/1000000:.2f}M"
         d3.metric("五日均量", f"{va_str} {unit}")
-        
         vy_val = vy if unit=="股" else vy/1000
         vy_str = f"{int(vy_val):,}"
         if unit == "股" and vy_val > 1000000: vy_str = f"{vy_val/1000000:.2f}M"
@@ -82,11 +80,9 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
         chg_val = curr - prev; pct = (chg_val / prev) * 100
         if chg_val > 0: chg_color = "#FF2B2B"; pct_txt = f"▲{pct:.2f}%"
         elif chg_val < 0: chg_color = "#00E050"; pct_txt = f"▼{abs(pct):.2f}%"
-    
     rank_class = f"rank-{rank}" if rank and rank <= 3 else "rank-norm"
     rank_content = f"{rank}" if rank else "-"
     rank_html = f"<div class='rank-badge {rank_class}'>{rank_content}</div>"
-    
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns([0.6, 2.0, 1.2, 1.0])
         with c1: st.markdown(rank_html, unsafe_allow_html=True)
@@ -106,7 +102,7 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
             st.markdown(f"<div class='status-tag' style='background-color:{tag_color}; color:white; width:100%; margin-top:10px;'>{tag_text}</div>", unsafe_allow_html=True)
     return False
 
-# V110: 新增 key 參數，避免 ID 衝突
+# V110: 支援 dynamic key
 def render_chart(df, title, color_settings, key=None):
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
@@ -117,8 +113,7 @@ def render_chart(df, title, color_settings, key=None):
     colors = ['#FF2B2B' if c >= o else '#00E050' for c, o in zip(df['Close'], df['Open'])]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=2, col=1)
     fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=10, b=10))
-    
-    # 這裡傳入 key
+    # 傳入 Key
     st.plotly_chart(fig, use_container_width=True, key=key)
 
 def render_ai_battle_dashboard(analysis):
