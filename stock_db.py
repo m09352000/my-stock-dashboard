@@ -4,8 +4,9 @@ import yfinance as yf
 import os
 import json
 from datetime import datetime
+from deep_translator import GoogleTranslator
 
-# --- V93: 資料庫核心 (Yahoo Finance 穩定版) ---
+# --- V94: 資料庫核心 (含自動翻譯) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -87,28 +88,22 @@ def update_watchlist(username, code, action="add"):
         return True
     except: return False
 
-# --- 4. 股票數據 (V93: 雙軌偵測引擎) ---
+# --- 4. 股票數據 ---
 def get_stock_data(code):
     try:
         ticker = None
         df = pd.DataFrame()
-        
-        # 智慧判斷：先試 .TW (上市)，若無資料再試 .TWO (上櫃)
         candidates = [f"{code}.TW", f"{code}.TWO"] if code.isdigit() else [code]
             
         for c in candidates:
             try:
                 temp_ticker = yf.Ticker(c)
-                # 抓取 6 個月資料，確保有足夠數據計算六大指標
                 temp_df = temp_ticker.history(period="6mo")
-                
                 if not temp_df.empty:
                     ticker = temp_ticker
                     df = temp_df
-                    # 修正時區問題
                     df.index = df.index.tz_localize(None)
                     df = df.reset_index()
-                    # 確保欄位名稱統一
                     if 'Date' in df.columns:
                         df['Date'] = df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
                     break
@@ -119,7 +114,6 @@ def get_stock_data(code):
 
         return f"{code}", ticker, df, "yahoo"
     except Exception as e:
-        print(f"DB Error: {e}")
         return code, None, None, "fail"
 
 def get_color_settings(code):
@@ -145,4 +139,14 @@ def save_comment(user, msg):
 def get_comments():
     if os.path.exists(COMMENTS_FILE): return pd.read_csv(COMMENTS_FILE)
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
-def translate_text(text): return text
+
+# --- 7. 翻譯功能 (V94 新增) ---
+def translate_text(text):
+    if not text or text == "暫無詳細描述": return "暫無詳細描述"
+    try:
+        # 限制長度以加快速度
+        text_to_translate = text[:450] 
+        translated = GoogleTranslator(source='auto', target='zh-TW').translate(text_to_translate)
+        return translated + "..." if len(text) > 450 else translated
+    except:
+        return text
