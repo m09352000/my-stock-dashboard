@@ -9,3 +9,4 @@ numpy
 lxml
 yfinance
 deep-translator
+FinMind
