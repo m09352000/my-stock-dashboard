@@ -42,6 +42,7 @@ def render_kline_pattern_card(title, pattern_data):
             st.markdown(f"**【市場心理】**\n{psycho}")
             st.markdown(f"**【操作 SOP】**\n👉 {action}")
 
+# V112 優化：基本面透視面板 (中文版)
 def render_fundamental_panel(stock_info):
     summary = stock_info.get('longBusinessSummary', '暫無資料')
     sector = stock_info.get('sector', 'N/A')
@@ -49,33 +50,49 @@ def render_fundamental_panel(stock_info):
     eps = stock_info.get('trailingEps', 0.0)
     pe = stock_info.get('trailingPE', 0.0)
     
-    with st.container(border=True):
-        c_main, c_info = st.columns([3, 1])
-        with c_main:
-            st.caption(f"板塊: {sector} | 產業: {industry}")
-            st.markdown(f"#### 🏢 企業概況")
-            with st.expander("📖 查看業務介紹 (已自動翻譯)", expanded=False):
-                st.write(summary)
-        with c_info:
-            st.metric("EPS (每股盈餘)", f"{eps}")
-            st.metric("P/E (本益比)", f"{pe:.2f}" if pe else "-")
+    st.markdown("### 🏢 公司基本面與產業透視")
+    
+    # 產業標籤與數據
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("所屬板塊", sector)
+    c2.metric("細分產業", industry)
+    
+    eps_val = f"{eps}" if eps != 0 else "-"
+    pe_val = f"{pe:.2f}" if pe != 0 else "-"
+    
+    c3.metric("EPS (每股盈餘)", eps_val)
+    c4.metric("本益比 (P/E)", pe_val)
+    
+    # 公司簡介
+    with st.expander("📖 查看詳細公司業務介紹", expanded=False):
+        st.write(summary)
+    
+    st.markdown("<hr class='compact'>", unsafe_allow_html=True)
 
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs, fh, tr, ba, cs, rt, unit="張", code=""):
     with st.container():
         c1, c2, c3, c4 = st.columns(4)
         val_color = "#FF2B2B" if chg > 0 else "#00E050" if chg < 0 else "white"
+        
         c1.markdown(f"<div style='font-size:0.9rem; color:#aaa'>成交價</div><div style='font-size:2.2rem; font-weight:bold; color:{val_color}; text-shadow: 0 0 10px rgba(255,255,255,0.1);'>{curr:.2f}</div><div style='font-size:1.1rem; color:{val_color}'>{chg:+.2f} ({pct:+.2f}%)</div>", unsafe_allow_html=True)
-        c2.metric("最高", f"{high:.2f}"); c3.metric("最低", f"{low:.2f}")
+        
+        c2.metric("最高", f"{high:.2f}")
+        c3.metric("最低", f"{low:.2f}")
+        
         vol_str = f"{int(vol):,}"
         if unit == "股" and vol > 1000000: vol_str = f"{vol/1000000:.2f}M"
         c4.metric("成交量", f"{vol_str} {unit}")
+        
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         d1, d2, d3, d4 = st.columns(4)
-        d1.metric("振幅", f"{amp:.2f}%"); d2.metric("量能狀態", vs)
+        d1.metric("振幅", f"{amp:.2f}%")
+        d2.metric("量能狀態", vs)
+        
         va_str = f"{int(va):,}"
         if unit == "張": va_str = f"{int(va/1000):,}"
         elif va > 1000000: va_str = f"{va/1000000:.2f}M"
         d3.metric("五日均量", f"{va_str}")
+        
         vy_str = f"{int(vy):,}"
         if unit == "張": vy_str = f"{int(vy/1000):,}"
         elif vy > 1000000: vy_str = f"{vy/1000000:.2f}M"
@@ -122,9 +139,6 @@ def render_chart(df, title, color_settings, key=None):
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=2, col=1)
     fig.update_layout(height=400, xaxis_rangeslider_visible=False, title=dict(text=title, font=dict(size=20)), margin=dict(l=10, r=10, t=40, b=10))
     st.plotly_chart(fig, use_container_width=True, key=key)
-
-def render_company_profile(summary):
-    pass # 為了相容舊版呼叫保留空函式，實際邏輯已移至 render_fundamental_panel
 
 def render_ai_battle_dashboard(analysis):
     st.markdown("---")
