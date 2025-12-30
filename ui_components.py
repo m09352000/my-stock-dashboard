@@ -1,5 +1,5 @@
 # ui_components.py
-# 視覺元件庫：負責繪圖、基本面卡片 (V111 完整版)
+# 視覺元件庫 (V112 全功能回歸)
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -42,7 +42,7 @@ def render_kline_pattern_card(title, pattern_data):
             st.markdown(f"**【市場心理】**\n{psycho}")
             st.markdown(f"**【操作 SOP】**\n👉 {action}")
 
-# V111 新增：基本面透視面板 (EPS, PE, Industry)
+# V112 優化：基本面透視面板 (中文版)
 def render_fundamental_panel(stock_info):
     summary = stock_info.get('longBusinessSummary', '暫無資料')
     sector = stock_info.get('sector', 'N/A')
@@ -57,15 +57,14 @@ def render_fundamental_panel(stock_info):
     c1.metric("所屬板塊", sector)
     c2.metric("細分產業", industry)
     
-    # EPS 顏色
-    eps_color = "normal"
-    if eps and eps > 0: eps_color = "normal" # 正數綠色或無色
+    eps_val = f"{eps}" if eps != 0 else "-"
+    pe_val = f"{pe:.2f}" if pe != 0 else "-"
     
-    c3.metric("EPS (每股盈餘)", f"{eps}", delta_color=eps_color)
-    c4.metric("本益比 (P/E)", f"{pe:.2f}" if pe else "N/A")
+    c3.metric("EPS (每股盈餘)", eps_val)
+    c4.metric("本益比 (P/E)", pe_val)
     
     # 公司簡介
-    with st.expander("📖 查看詳細公司業務介紹", expanded=True):
+    with st.expander("📖 查看詳細公司業務介紹", expanded=False):
         st.write(summary)
     
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
@@ -75,7 +74,6 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs
         c1, c2, c3, c4 = st.columns(4)
         val_color = "#FF2B2B" if chg > 0 else "#00E050" if chg < 0 else "white"
         
-        # V111: 更醒目的即時價格顯示
         c1.markdown(f"<div style='font-size:0.9rem; color:#aaa'>成交價</div><div style='font-size:2.2rem; font-weight:bold; color:{val_color}; text-shadow: 0px 0px 10px rgba(255,255,255,0.1);'>{curr:.2f}</div><div style='font-size:1.1rem; color:{val_color}'>{chg:+.2f} ({pct:+.2f}%)</div>", unsafe_allow_html=True)
         
         c2.metric("最高", f"{high:.2f}")
