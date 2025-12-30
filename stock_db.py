@@ -5,10 +5,9 @@ import os
 import json
 from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
-from FinMind.data import DataLoader
 import streamlit as st
 
-# --- V97: 資料庫核心 (長文翻譯完美版) ---
+# --- V98: 資料庫核心 (Safe Boot 延遲載入版) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -126,11 +125,15 @@ def get_info_data(symbol):
     except Exception as e:
         return {}
 
-# --- V95 智能籌碼 ---
+# --- V98 關鍵修改：延遲載入 FinMind (解決開機黑畫面) ---
 @st.cache_data(ttl=3600)
 def get_chip_data(stock_id):
     try:
         if not stock_id.isdigit(): return None
+        
+        # ⚠️ 關鍵：用到時才載入，避免開機卡死
+        from FinMind.data import DataLoader
+        
         dl = DataLoader()
         start_date = (datetime.now() - timedelta(days=15)).strftime('%Y-%m-%d')
         df_inst = dl.taiwan_stock_institutional_investors(stock_id=stock_id, start_date=start_date)
@@ -172,30 +175,18 @@ def get_comments():
     if os.path.exists(COMMENTS_FILE): return pd.read_csv(COMMENTS_FILE)
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
 
-# --- 7. 翻譯功能 (V97: 分段完整翻譯) ---
+# --- 7. 翻譯功能 (長文完整翻譯) ---
 def translate_text(text):
-    if not text or text == "暫無詳細描述": return "" # 回傳空字串以便前端判斷隱藏
-    
+    if not text or text == "暫無詳細描述": return "" 
     try:
         translator = GoogleTranslator(source='auto', target='zh-TW')
-        
-        # 1. 如果文字不長，直接翻譯
-        if len(text) < 1000:
-            return translator.translate(text)
-            
-        # 2. 如果文字過長，進行分段處理 (每 1000 字一段)
+        if len(text) < 1000: return translator.translate(text)
         chunks = [text[i:i+1000] for i in range(0, len(text), 1000)]
         translated_chunks = []
-        
         for chunk in chunks:
             try:
                 res = translator.translate(chunk)
                 if res: translated_chunks.append(res)
-            except:
-                translated_chunks.append(chunk) # 失敗則保留原文
-                
+            except: translated_chunks.append(chunk)
         return "".join(translated_chunks)
-        
-    except Exception as e:
-        print(f"Translation Error: {e}")
-        return text # 翻譯引擎掛掉時顯示原文，至少比空白好
+    except Exception as e: return text
