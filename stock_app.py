@@ -30,7 +30,7 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V95", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V96", layout="wide")
 
 # --- 通用字串比對函式 ---
 def find_best_match_stock_v90(text):
@@ -203,13 +203,13 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; st.query_params.clear(); nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 95.1 (FinMind 修正版)")
+    st.markdown("---"); st.caption("Ver: 96.1 (RateLimit 修復版)")
 
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V95")
-    st.markdown("### 🚀 V95 旗艦更新：\n* **🧠 真實 AI 雷達**：引入 FinMind 籌碼數據，精準計算外資投信動向。\n* **🛡️ 雙引擎數據**：Yahoo Finance 負責秒級 K 線，FinMind 負責深度籌碼。\n* **🌏 全自動翻譯**：英文簡介自動轉為繁體中文。\n* **⚡ 流量優化**：智慧快取機制，免費版也能享受專業級數據。")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V96")
+    st.markdown("### 🚀 V96 旗艦更新：\n* **🛡️ 防爆快取**：永久修復 RateLimit 錯誤，即時刷新也不會被封鎖。\n* **🧠 真實 AI 雷達**：引入 FinMind 籌碼數據，精準計算外資投信動向。\n* **🌏 全自動翻譯**：英文簡介自動轉為繁體中文。")
 
 elif mode == 'login':
     ui.render_header("🔐 會員中心"); t1, t2 = st.tabs(["登入", "註冊"])
@@ -262,7 +262,7 @@ elif mode == 'watch':
                     if remove_list:
                         for item in remove_list: db.update_watchlist(uid, item.split(" ")[0], "remove")
                         st.success("已移除"); st.rerun()
-            if st.button("🚀 啟動 AI 詳細診斷 (V95)", use_container_width=True): st.session_state['watch_active'] = True; st.rerun()
+            if st.button("🚀 啟動 AI 詳細診斷 (V96)", use_container_width=True): st.session_state['watch_active'] = True; st.rerun()
             if st.session_state['watch_active']:
                 st.success("診斷完成！")
                 for i, code in enumerate(wl):
@@ -285,7 +285,11 @@ elif mode == 'analysis':
             if src == "fail": st.error("查無資料"); return False
             elif src == "yahoo":
                 df, bid_ask, rt_pack = inject_realtime_data(df, code)
-                info = stock.info
+                
+                # --- V96.1 關鍵修復：使用快取取得 info，避免 Rate Limit 錯誤 ---
+                symbol_id = stock.ticker if hasattr(stock, 'ticker') else code
+                info = db.get_info_data(symbol_id) # 這裡會使用 24小時快取
+                
                 shares = info.get('sharesOutstanding', 0)
                 curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]; chg = curr - prev; pct = (chg/prev)*100
                 vt = df['Volume'].iloc[-1]
@@ -295,7 +299,7 @@ elif mode == 'analysis':
                 fh = info.get('heldPercentInstitutions', 0)*100
                 color_settings = db.get_color_settings(code)
                 
-                # V95: 獲取真實籌碼與主力動向
+                # V96: 獲取真實籌碼與主力動向
                 chip_data = db.get_chip_data(code)
                 mf_str = "籌碼計算中..."
                 if chip_data:
@@ -324,7 +328,6 @@ elif mode == 'analysis':
             ui.render_back_button(go_back)
             return is_live
 
-    # --- 關鍵修正：迴圈縮排 ---
     is_live_mode = render_content()
     if is_live_mode:
         while True: 
