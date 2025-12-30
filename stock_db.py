@@ -1,13 +1,17 @@
 import pandas as pd
 import twstock
+import yfinance as yf
 import os
 import json
 from datetime import datetime
+
+# --- V92: 資料庫核心 (Yahoo Finance 修復版) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
 COMMENTS_FILE = 'stock_comments.csv'
 
+# --- 1. 初始化資料庫 ---
 def init_db():
     users = {}
     if os.path.exists(USERS_FILE):
@@ -16,7 +20,7 @@ def init_db():
                 users = json.load(f)
         except: users = {}
     
-    # 強制重置管理員，確保可登入
+    # 強制重置管理員
     users["admin"] = {"password": "admin888", "name": "超級管理員"}
     
     with open(USERS_FILE, 'w', encoding='utf-8') as f:
@@ -32,6 +36,7 @@ def init_db():
 
 init_db()
 
+# --- 2. 使用者系統 ---
 def login_user(username, password):
     try:
         with open(USERS_FILE, 'r', encoding='utf-8') as f:
@@ -60,6 +65,7 @@ def get_user_nickname(username):
         return users.get(username, {}).get('name', username)
     except: return username
 
+# --- 3. 自選股系統 ---
 def get_watchlist(username):
     try:
         with open(WATCHLIST_FILE, 'r', encoding='utf-8') as f:
@@ -82,29 +88,59 @@ def update_watchlist(username, code, action="add"):
         return True
     except: return False
 
+# --- 4. 股票數據 (改用 yfinance 修復查無資料問題) ---
 def get_stock_data(code):
     try:
-        stock = twstock.Stock(code)
-        hist = stock.fetch_from(2023, 1) 
-        if len(hist) > 60: hist = hist[-60:]
-        data = {
-            'Date': [d.date for d in hist], 'Open': [d.open for d in hist],
-            'High': [d.high for d in hist], 'Low': [d.low for d in hist],
-            'Close': [d.close for d in hist], 'Volume': [d.capacity for d in hist]
-        }
-        df = pd.DataFrame(data).fillna(method='ffill')
-        return f"{code}", stock, df, "yahoo"
-    except: return code, None, None, "fail"
+        # 自動判斷後綴 (上市.TW / 上櫃.TWO)
+        ticker = None
+        df = pd.DataFrame()
+        
+        # 1. 嘗試直接搜尋 (支援美股或已帶後綴代號)
+        candidates = [code]
+        
+        # 2. 如果是純數字 (台股)，優先嘗試 .TW，其次 .TWO
+        if code.isdigit():
+            candidates = [f"{code}.TW", f"{code}.TWO"]
+            
+        for c in candidates:
+            try:
+                temp_ticker = yf.Ticker(c)
+                # 抓取 3 個月資料建立 K 線
+                temp_df = temp_ticker.history(period="3mo")
+                if not temp_df.empty:
+                    ticker = temp_ticker
+                    df = temp_df
+                    break
+            except: continue
 
-def get_color_settings(code): return {'up': 'red', 'down': 'green', 'delta': 'inverse'}
+        if ticker is None or df.empty:
+            return code, None, None, "fail"
+
+        # 資料清洗：統一欄位名稱
+        df = df.reset_index()
+        # 確保日期格式乾淨 (去除時區)
+        df['Date'] = df['Date'].dt.date
+        
+        return f"{code}", ticker, df, "yahoo"
+    except Exception as e:
+        print(f"Error: {e}")
+        return code, None, None, "fail"
+
+def get_color_settings(code):
+    return {'up': 'red', 'down': 'green', 'delta': 'inverse'}
+
+# --- 5. 掃描與歷史紀錄 ---
 def add_history(user, text): pass 
+
 def save_scan_results(stype, codes):
     with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
+
 def load_scan_results(stype):
     if os.path.exists(f"scan_{stype}.json"):
         with open(f"scan_{stype}.json", 'r') as f: return json.load(f)
     return []
 
+# --- 6. 留言板 ---
 def save_comment(user, msg):
     if not os.path.exists(COMMENTS_FILE): df = pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
     else: df = pd.read_csv(COMMENTS_FILE)
@@ -115,4 +151,8 @@ def save_comment(user, msg):
 def get_comments():
     if os.path.exists(COMMENTS_FILE): return pd.read_csv(COMMENTS_FILE)
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
-def translate_text(text): return text
+
+# --- 7. 其他 ---
+def translate_text(text):
+    # 簡易繁簡轉換或直接回傳 (視需求可擴充)
+    return text
