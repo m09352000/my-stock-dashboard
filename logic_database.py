@@ -187,7 +187,6 @@ def get_realtime_data(df, code):
     except: return df, None, _make_fake_rt(df)
 
 def get_color_settings(code): return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'}
-def translate_text_placeholder(text): return text # 舊版相容
 def save_scan_results(stype, codes):
     with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
 def load_scan_results(stype):
