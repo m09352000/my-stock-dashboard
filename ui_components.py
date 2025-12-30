@@ -1,5 +1,5 @@
 # ui_components.py
-# 視覺元件庫：負責繪圖、卡片渲染 (V110 修復版)
+# 視覺元件庫：負責繪圖、基本面卡片 (V111 完整版)
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -7,16 +7,11 @@ from plotly.subplots import make_subplots
 import ui_styles
 
 def render_header(title, show_monitor=False, is_live=False, time_str=""):
-    """
-    V110: Header 介面，支援外部傳入時間字串
-    """
     ui_styles.inject_custom_css()
     c1, c2 = st.columns([3, 1])
     c1.title(title)
-    
     if is_live:
-        c2.markdown(f"<div style='text-align:right;'><span class='live-tag'>● LIVE 連線中</span><br><span style='font-size:0.8rem;color:#888'>{time_str}</span></div>", unsafe_allow_html=True)
-    
+        c2.markdown(f"<div style='text-align:right;'><span class='live-tag'>● LIVE 即時連線</span><br><span style='font-size:0.8rem;color:#888'>{time_str}</span></div>", unsafe_allow_html=True)
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
 
 def render_back_button(callback_func):
@@ -47,27 +42,59 @@ def render_kline_pattern_card(title, pattern_data):
             st.markdown(f"**【市場心理】**\n{psycho}")
             st.markdown(f"**【操作 SOP】**\n👉 {action}")
 
-def render_company_profile(summary):
-    if summary:
-        with st.expander("🏢 公司簡介", expanded=False): st.write(summary)
+# V111 新增：基本面透視面板 (EPS, PE, Industry)
+def render_fundamental_panel(stock_info):
+    summary = stock_info.get('longBusinessSummary', '暫無資料')
+    sector = stock_info.get('sector', 'N/A')
+    industry = stock_info.get('industry', 'N/A')
+    eps = stock_info.get('trailingEps', 0.0)
+    pe = stock_info.get('trailingPE', 0.0)
+    
+    st.markdown("### 🏢 公司基本面與產業透視")
+    
+    # 產業標籤與數據
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("所屬板塊", sector)
+    c2.metric("細分產業", industry)
+    
+    # EPS 顏色
+    eps_color = "normal"
+    if eps and eps > 0: eps_color = "normal" # 正數綠色或無色
+    
+    c3.metric("EPS (每股盈餘)", f"{eps}", delta_color=eps_color)
+    c4.metric("本益比 (P/E)", f"{pe:.2f}" if pe else "N/A")
+    
+    # 公司簡介
+    with st.expander("📖 查看詳細公司業務介紹", expanded=True):
+        st.write(summary)
+    
+    st.markdown("<hr class='compact'>", unsafe_allow_html=True)
 
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs, fh, tr, ba, cs, rt, unit="張", code=""):
     with st.container():
         c1, c2, c3, c4 = st.columns(4)
         val_color = "#FF2B2B" if chg > 0 else "#00E050" if chg < 0 else "white"
-        c1.markdown(f"<div style='font-size:0.9rem; color:#aaa'>成交價</div><div style='font-size:2rem; font-weight:bold; color:{val_color}'>{curr:.2f} <span style='font-size:1rem'>({pct:+.2f}%)</span></div>", unsafe_allow_html=True)
-        c2.metric("最高", f"{high:.2f}"); c3.metric("最低", f"{low:.2f}")
+        
+        # V111: 更醒目的即時價格顯示
+        c1.markdown(f"<div style='font-size:0.9rem; color:#aaa'>成交價</div><div style='font-size:2.2rem; font-weight:bold; color:{val_color}; text-shadow: 0px 0px 10px rgba(255,255,255,0.1);'>{curr:.2f}</div><div style='font-size:1.1rem; color:{val_color}'>{chg:+.2f} ({pct:+.2f}%)</div>", unsafe_allow_html=True)
+        
+        c2.metric("最高", f"{high:.2f}")
+        c3.metric("最低", f"{low:.2f}")
         
         vol_str = f"{int(vol):,}"
         if unit == "股" and vol > 1000000: vol_str = f"{vol/1000000:.2f}M"
         c4.metric("成交量", f"{vol_str} {unit}")
+        
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         d1, d2, d3, d4 = st.columns(4)
-        d1.metric("振幅", f"{amp:.2f}%"); d2.metric("量能狀態", vs)
+        d1.metric("振幅", f"{amp:.2f}%")
+        d2.metric("量能狀態", vs)
+        
         va_val = va if unit=="股" else va/1000
         va_str = f"{int(va_val):,}"
         if unit == "股" and va_val > 1000000: va_str = f"{va_val/1000000:.2f}M"
         d3.metric("五日均量", f"{va_str} {unit}")
+        
         vy_val = vy if unit=="股" else vy/1000
         vy_str = f"{int(vy_val):,}"
         if unit == "股" and vy_val > 1000000: vy_str = f"{vy_val/1000000:.2f}M"
@@ -80,9 +107,11 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
         chg_val = curr - prev; pct = (chg_val / prev) * 100
         if chg_val > 0: chg_color = "#FF2B2B"; pct_txt = f"▲{pct:.2f}%"
         elif chg_val < 0: chg_color = "#00E050"; pct_txt = f"▼{abs(pct):.2f}%"
+    
     rank_class = f"rank-{rank}" if rank and rank <= 3 else "rank-norm"
     rank_content = f"{rank}" if rank else "-"
     rank_html = f"<div class='rank-badge {rank_class}'>{rank_content}</div>"
+    
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns([0.6, 2.0, 1.2, 1.0])
         with c1: st.markdown(rank_html, unsafe_allow_html=True)
@@ -91,6 +120,7 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
         with c4:
             st.write(""); 
             if st.button("查看", key=f"{key_prefix}_{code}", use_container_width=True): return True
+
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         d1, d2 = st.columns([3, 1])
         with d1:
@@ -102,7 +132,6 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
             st.markdown(f"<div class='status-tag' style='background-color:{tag_color}; color:white; width:100%; margin-top:10px;'>{tag_text}</div>", unsafe_allow_html=True)
     return False
 
-# V110: 支援 dynamic key
 def render_chart(df, title, color_settings, key=None):
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
@@ -113,7 +142,6 @@ def render_chart(df, title, color_settings, key=None):
     colors = ['#FF2B2B' if c >= o else '#00E050' for c, o in zip(df['Close'], df['Open'])]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=2, col=1)
     fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=10, b=10))
-    # 傳入 Key
     st.plotly_chart(fig, use_container_width=True, key=key)
 
 def render_ai_battle_dashboard(analysis):
