@@ -8,7 +8,7 @@ from deep_translator import GoogleTranslator
 from FinMind.data import DataLoader
 import streamlit as st
 
-# --- V96.1: 混合雙引擎核心 (含 RateLimit 防護盾) ---
+# --- V97: 資料庫核心 (長文翻譯完美版) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -90,7 +90,7 @@ def update_watchlist(username, code, action="add"):
         return True
     except: return False
 
-# --- 4. 股票數據 (Yahoo Finance 引擎) ---
+# --- 4. 股票數據 (Yahoo Finance) ---
 def get_stock_data(code):
     try:
         ticker = None
@@ -118,17 +118,15 @@ def get_stock_data(code):
     except Exception as e:
         return code, None, None, "fail"
 
-# --- V96.1 新增: 基本面資料快取 (關鍵修復 Rate Limit) ---
-@st.cache_data(ttl=86400) # 快取 24 小時
+# --- V96.1 Rate Limit 防護盾 ---
+@st.cache_data(ttl=86400)
 def get_info_data(symbol):
     try:
-        # 使用新的 Ticker 物件獲取 info，避免 session 汙染
         return yf.Ticker(symbol).info
     except Exception as e:
-        print(f"Info Fetch Error: {e}")
         return {}
 
-# --- V95: 智能籌碼抓取 (FinMind + Cache) ---
+# --- V95 智能籌碼 ---
 @st.cache_data(ttl=3600)
 def get_chip_data(stock_id):
     try:
@@ -136,7 +134,6 @@ def get_chip_data(stock_id):
         dl = DataLoader()
         start_date = (datetime.now() - timedelta(days=15)).strftime('%Y-%m-%d')
         df_inst = dl.taiwan_stock_institutional_investors(stock_id=stock_id, start_date=start_date)
-        
         chip_data = {"foreign": 0, "trust": 0, "dealer": 0, "date": ""}
         if not df_inst.empty:
             latest_date = df_inst['date'].max()
@@ -175,11 +172,30 @@ def get_comments():
     if os.path.exists(COMMENTS_FILE): return pd.read_csv(COMMENTS_FILE)
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
 
-# --- 7. 翻譯功能 ---
+# --- 7. 翻譯功能 (V97: 分段完整翻譯) ---
 def translate_text(text):
-    if not text or text == "暫無詳細描述": return "暫無詳細描述"
+    if not text or text == "暫無詳細描述": return "" # 回傳空字串以便前端判斷隱藏
+    
     try:
-        text_to_translate = text[:450] 
-        translated = GoogleTranslator(source='auto', target='zh-TW').translate(text_to_translate)
-        return translated + "..." if len(text) > 450 else translated
-    except: return text
+        translator = GoogleTranslator(source='auto', target='zh-TW')
+        
+        # 1. 如果文字不長，直接翻譯
+        if len(text) < 1000:
+            return translator.translate(text)
+            
+        # 2. 如果文字過長，進行分段處理 (每 1000 字一段)
+        chunks = [text[i:i+1000] for i in range(0, len(text), 1000)]
+        translated_chunks = []
+        
+        for chunk in chunks:
+            try:
+                res = translator.translate(chunk)
+                if res: translated_chunks.append(res)
+            except:
+                translated_chunks.append(chunk) # 失敗則保留原文
+                
+        return "".join(translated_chunks)
+        
+    except Exception as e:
+        print(f"Translation Error: {e}")
+        return text # 翻譯引擎掛掉時顯示原文，至少比空白好
