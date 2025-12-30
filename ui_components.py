@@ -1,5 +1,5 @@
 # ui_components.py
-# 視覺元件庫 (V112 全功能回歸)
+# V113: 視覺美化 (消除空白 + 質感提升)
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -8,11 +8,14 @@ import ui_styles
 
 def render_header(title, show_monitor=False, is_live=False, time_str=""):
     ui_styles.inject_custom_css()
+    # V113: 標題與開關排版優化
     c1, c2 = st.columns([3, 1])
-    c1.title(title)
+    if title: c1.title(title)
     if is_live:
-        c2.markdown(f"<div style='text-align:right;'><span class='live-tag'>● LIVE 即時連線</span><br><span style='font-size:0.8rem;color:#888'>{time_str}</span></div>", unsafe_allow_html=True)
-    st.markdown("<hr class='compact'>", unsafe_allow_html=True)
+        c2.markdown(f"<div style='text-align:right; padding-top:10px;'><span class='live-tag'>● LIVE 連線中</span> <span style='font-size:0.9rem;color:#aaa'>({time_str})</span></div>", unsafe_allow_html=True)
+    
+    # 移除原本的 hr，讓版面更緊湊
+    # st.markdown("<hr class='compact'>", unsafe_allow_html=True) 
 
 def render_back_button(callback_func):
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
@@ -34,15 +37,14 @@ def render_kline_pattern_card(title, pattern_data):
             opens = [x[0] for x in raw_data]; highs = [x[1] for x in raw_data]
             lows = [x[2] for x in raw_data]; closes = [x[3] for x in raw_data]
             fig = go.Figure(data=[go.Candlestick(x=idx, open=opens, high=highs, low=lows, close=closes, increasing_line_color='#FF2B2B', decreasing_line_color='#00E050')])
-            fig.update_layout(margin=dict(l=2, r=2, t=10, b=2), height=180, xaxis=dict(visible=False), yaxis=dict(visible=False), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False)
+            fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=150, xaxis=dict(visible=False), yaxis=dict(visible=False), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False)
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         with c2:
-            st.markdown(f"### 💡 {title}")
-            st.markdown(f"**【形態特徵】** {morph}")
-            st.markdown(f"**【市場心理】**\n{psycho}")
-            st.markdown(f"**【操作 SOP】**\n👉 {action}")
+            st.markdown(f"**{title}**")
+            st.caption(morph)
+            st.markdown(f"👉 **操作**：{action}")
 
-# V112 優化：基本面透視面板 (中文版)
+# V113: 美化版基本面透視
 def render_fundamental_panel(stock_info):
     summary = stock_info.get('longBusinessSummary', '暫無資料')
     sector = stock_info.get('sector', 'N/A')
@@ -50,31 +52,37 @@ def render_fundamental_panel(stock_info):
     eps = stock_info.get('trailingEps', 0.0)
     pe = stock_info.get('trailingPE', 0.0)
     
-    st.markdown("### 🏢 公司基本面與產業透視")
-    
-    # 產業標籤與數據
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("所屬板塊", sector)
-    c2.metric("細分產業", industry)
-    
-    eps_val = f"{eps}" if eps != 0 else "-"
-    pe_val = f"{pe:.2f}" if pe != 0 else "-"
-    
-    c3.metric("EPS (每股盈餘)", eps_val)
-    c4.metric("本益比 (P/E)", pe_val)
-    
-    # 公司簡介
-    with st.expander("📖 查看詳細公司業務介紹", expanded=False):
-        st.write(summary)
-    
-    st.markdown("<hr class='compact'>", unsafe_allow_html=True)
+    # 使用 container 包裝，增加背景色
+    with st.container(border=True):
+        c_main, c_info = st.columns([3, 1])
+        with c_main:
+            st.caption(f"{sector} | {industry}")
+            st.markdown(f"#### 🏢 企業概況")
+            with st.expander("📖 點擊查看詳細業務介紹 (中文翻譯)", expanded=False):
+                st.write(summary)
+        
+        with c_info:
+            st.metric("EPS (盈餘)", f"{eps}", help="每股盈餘")
+            st.metric("P/E (本益比)", f"{pe:.1f}" if pe else "-", help="股價/EPS")
 
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs, fh, tr, ba, cs, rt, unit="張", code=""):
+    # V113: 緊湊型儀表板
     with st.container():
         c1, c2, c3, c4 = st.columns(4)
         val_color = "#FF2B2B" if chg > 0 else "#00E050" if chg < 0 else "white"
         
-        c1.markdown(f"<div style='font-size:0.9rem; color:#aaa'>成交價</div><div style='font-size:2.2rem; font-weight:bold; color:{val_color}; text-shadow: 0px 0px 10px rgba(255,255,255,0.1);'>{curr:.2f}</div><div style='font-size:1.1rem; color:{val_color}'>{chg:+.2f} ({pct:+.2f}%)</div>", unsafe_allow_html=True)
+        # 主價格放大，並加上陰影
+        c1.markdown(f"""
+        <div style="line-height:1;">
+            <span style='font-size:0.8rem; color:#aaa'>最新成交</span><br>
+            <span style='font-size:2.5rem; font-weight:bold; color:{val_color}; text-shadow: 0 0 10px rgba({255 if chg>0 else 0}, {43 if chg>0 else 224}, {43 if chg>0 else 80}, 0.3);'>
+                {curr:.2f}
+            </span>
+            <span style='font-size:1.2rem; color:{val_color}; margin-left:10px;'>
+                {chg:+.2f} ({pct:+.2f}%)
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
         
         c2.metric("最高", f"{high:.2f}")
         c3.metric("最低", f"{low:.2f}")
@@ -83,20 +91,20 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs
         if unit == "股" and vol > 1000000: vol_str = f"{vol/1000000:.2f}M"
         c4.metric("成交量", f"{vol_str} {unit}")
         
-        st.markdown("<hr class='compact'>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:10px'></div>", unsafe_allow_html=True)
         d1, d2, d3, d4 = st.columns(4)
         d1.metric("振幅", f"{amp:.2f}%")
-        d2.metric("量能狀態", vs)
+        d2.metric("量能", vs)
         
-        va_val = va if unit=="股" else va/1000
-        va_str = f"{int(va_val):,}"
-        if unit == "股" and va_val > 1000000: va_str = f"{va_val/1000000:.2f}M"
-        d3.metric("五日均量", f"{va_str} {unit}")
+        va_str = f"{int(va):,}"
+        if unit == "張": va_str = f"{int(va/1000):,}"
+        elif va > 1000000: va_str = f"{va/1000000:.2f}M"
+        d3.metric("五日均量", f"{va_str}")
         
-        vy_val = vy if unit=="股" else vy/1000
-        vy_str = f"{int(vy_val):,}"
-        if unit == "股" and vy_val > 1000000: vy_str = f"{vy_val/1000000:.2f}M"
-        d4.metric("昨日量", f"{vy_str} {unit}")
+        vy_str = f"{int(vy):,}"
+        if unit == "張": vy_str = f"{int(vy/1000):,}"
+        elif vy > 1000000: vy_str = f"{vy/1000000:.2f}M"
+        d4.metric("昨日量", f"{vy_str}")
 
 def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix="btn", rank=None, strategy_info=None, score=0, w_prob=50):
     chg_color = "gray"; pct_txt = "0.00%"
@@ -106,9 +114,7 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
         if chg_val > 0: chg_color = "#FF2B2B"; pct_txt = f"▲{pct:.2f}%"
         elif chg_val < 0: chg_color = "#00E050"; pct_txt = f"▼{abs(pct):.2f}%"
     
-    rank_class = f"rank-{rank}" if rank and rank <= 3 else "rank-norm"
-    rank_content = f"{rank}" if rank else "-"
-    rank_html = f"<div class='rank-badge {rank_class}'>{rank_content}</div>"
+    rank_html = f"<div class='rank-badge rank-{rank if rank and rank<=3 else 'norm'}'>{rank if rank else '-'}</div>"
     
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns([0.6, 2.0, 1.2, 1.0])
@@ -139,7 +145,7 @@ def render_chart(df, title, color_settings, key=None):
     fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1), name='20日線'), row=1, col=1)
     colors = ['#FF2B2B' if c >= o else '#00E050' for c, o in zip(df['Close'], df['Open'])]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=2, col=1)
-    fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=10, b=10))
+    fig.update_layout(height=400, xaxis_rangeslider_visible=False, title=dict(text=title, font=dict(size=20)), margin=dict(l=10, r=10, t=40, b=10))
     st.plotly_chart(fig, use_container_width=True, key=key)
 
 def render_ai_battle_dashboard(analysis):
