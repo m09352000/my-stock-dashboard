@@ -1,5 +1,5 @@
 # ui_components.py
-# V118: 視覺元件庫 (基本面顯示優化)
+# V119: 視覺元件庫 (介面隱藏空內容優化)
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -20,7 +20,7 @@ def render_fundamental_panel(stock_info):
     code = stock_info.get('code', '')
     summary_raw = stock_info.get('longBusinessSummary', '')
     
-    # 進行翻譯 (如果不是自動生成的中文)
+    # 進行翻譯
     summary_zh = db.translate_text(summary_raw)
     
     sector = stock_info.get('sector', '-')
@@ -33,8 +33,15 @@ def render_fundamental_panel(stock_info):
         with c_main:
             st.markdown(f"### 🏢 {name} ({code}) 企業概況")
             st.caption(f"板塊: {sector} | 產業: {industry}")
-            with st.expander("📖 查看業務介紹 (中文)", expanded=True): # 預設展開
-                st.write(summary_zh)
+            
+            # --- V119 修改：內容檢測 ---
+            # 只有當真的有內容時，才顯示 Expander
+            # 這樣當 logic_database 回傳空字串時，這裡就會自動隱藏，保持版面乾淨
+            if summary_zh and len(str(summary_zh)) > 5:
+                with st.expander("📖 查看業務介紹 (中文)", expanded=True): 
+                    st.write(summary_zh)
+            # -------------------------
+
         with c_info:
             eps_val = f"{eps}" if eps != 0 else "-"
             pe_val = f"{pe:.2f}" if pe != 0 else "-"
@@ -68,7 +75,7 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs
 
 def render_chart(df, title, color_settings, key=None):
     if key is None: key = "chart_default"
-    # 防呆：如果 df 太少，不畫 MA
+    # 防呆
     if len(df) > 5:
         df['MA5'] = df['Close'].rolling(5).mean()
     if len(df) > 20:
@@ -78,9 +85,9 @@ def render_chart(df, title, color_settings, key=None):
     fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K線', increasing_line_color='#FF2B2B', decreasing_line_color='#00E050'), row=1, col=1)
     
     if 'MA5' in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], line=dict(color='#FF00FF', width=1), name='5日線'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], line=dict(color='#FF00FF', width=1), name='5MA'), row=1, col=1)
     if 'MA20' in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1), name='20日線'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1), name='20MA'), row=1, col=1)
         
     colors = ['#FF2B2B' if c >= o else '#00E050' for c, o in zip(df['Close'], df['Open'])]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=2, col=1)
@@ -88,7 +95,6 @@ def render_chart(df, title, color_settings, key=None):
     fig.update_layout(height=400, xaxis_rangeslider_visible=False, title=dict(text=title, font=dict(size=20)), margin=dict(l=10, r=10, t=40, b=10))
     st.plotly_chart(fig, use_container_width=True, key=key)
 
-# ... (AI Dashboard 等維持不變) ...
 def render_ai_battle_dashboard(analysis):
     st.markdown("---")
     st.subheader("🤖 AI 戰情診斷室")
