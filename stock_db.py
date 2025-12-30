@@ -6,15 +6,15 @@ import json
 from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 from FinMind.data import DataLoader
-import streamlit as st # 引入 streamlit 以使用快取
+import streamlit as st
 
-# --- V95: 混合雙引擎核心 (FinMind 節流版) ---
+# --- V95: 混合雙引擎核心 (FinMind 節流版 + Yahoo 穩定版) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
 COMMENTS_FILE = 'stock_comments.csv'
 
-# --- 1. 初始化資料庫 (維持不變) ---
+# --- 1. 初始化資料庫 ---
 def init_db():
     users = {}
     if os.path.exists(USERS_FILE):
@@ -23,7 +23,9 @@ def init_db():
                 users = json.load(f)
         except: users = {}
     
+    # 強制重置管理員
     users["admin"] = {"password": "admin888", "name": "超級管理員"}
+    
     with open(USERS_FILE, 'w', encoding='utf-8') as f:
         json.dump(users, f, ensure_ascii=False)
 
@@ -37,7 +39,7 @@ def init_db():
 
 init_db()
 
-# --- 2. 使用者系統 (維持不變) ---
+# --- 2. 使用者系統 ---
 def login_user(username, password):
     try:
         with open(USERS_FILE, 'r', encoding='utf-8') as f:
@@ -66,7 +68,7 @@ def get_user_nickname(username):
         return users.get(username, {}).get('name', username)
     except: return username
 
-# --- 3. 自選股系統 (維持不變) ---
+# --- 3. 自選股系統 ---
 def get_watchlist(username):
     try:
         with open(WATCHLIST_FILE, 'r', encoding='utf-8') as f:
@@ -89,18 +91,18 @@ def update_watchlist(username, code, action="add"):
         return True
     except: return False
 
-# --- 4. 股票數據 (雙引擎) ---
+# --- 4. 股票數據 (Yahoo Finance 引擎) ---
 def get_stock_data(code):
     try:
         ticker = None
         df = pd.DataFrame()
-        # 1. 用 yfinance 抓秒級股價 (不限流量)
+        # 自動判斷上市(.TW) 或上櫃(.TWO)
         candidates = [f"{code}.TW", f"{code}.TWO"] if code.isdigit() else [code]
             
         for c in candidates:
             try:
                 temp_ticker = yf.Ticker(c)
-                temp_df = temp_ticker.history(period="6mo")
+                temp_df = temp_ticker.history(period="6mo") # 抓半年以計算 MA60
                 if not temp_df.empty:
                     ticker = temp_ticker
                     df = temp_df
@@ -118,35 +120,36 @@ def get_stock_data(code):
     except Exception as e:
         return code, None, None, "fail"
 
-# --- V95 新增: 智能籌碼抓取 (含快取) ---
+# --- V95: 智能籌碼抓取 (FinMind + Cache) ---
 @st.cache_data(ttl=3600) # 關鍵：快取 1 小時，避免爆流量
 def get_chip_data(stock_id):
     try:
         if not stock_id.isdigit(): return None # 美股無籌碼
         
         dl = DataLoader()
-        # 抓取最近 5 天 (確保有資料)
-        start_date = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
+        # 抓取最近 10 天 (確保有資料)
+        start_date = (datetime.now() - timedelta(days=15)).strftime('%Y-%m-%d')
         
-        # 1. 三大法人
         df_inst = dl.taiwan_stock_institutional_investors(
             stock_id=stock_id, 
             start_date=start_date
         )
         
-        chip_data = {"foreign": 0, "trust": 0, "dealer": 0}
+        chip_data = {"foreign": 0, "trust": 0, "dealer": 0, "date": ""}
         
         if not df_inst.empty:
             # 取最近一天的資料
             latest_date = df_inst['date'].max()
             df_last = df_inst[df_inst['date'] == latest_date]
             
+            chip_data["date"] = latest_date
+            
             for _, row in df_last.iterrows():
                 net = (row['buy'] - row['sell']) / 1000 # 換算張數
                 if row['name'] == 'Foreign_Investor': chip_data['foreign'] = int(net)
                 elif row['name'] == 'Investment_Trust': chip_data['trust'] = int(net)
-                elif row['name'] == 'Dealer_Self': chip_data['dealer'] += int(net) # 自營商(自行買賣)
-                elif row['name'] == 'Dealer_Hedging': chip_data['dealer'] += int(net) # 自營商(避險)
+                elif row['name'] == 'Dealer_Self': chip_data['dealer'] += int(net)
+                elif row['name'] == 'Dealer_Hedging': chip_data['dealer'] += int(net)
 
         return chip_data
     except:
@@ -176,7 +179,7 @@ def get_comments():
     if os.path.exists(COMMENTS_FILE): return pd.read_csv(COMMENTS_FILE)
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
 
-# --- 7. 翻譯功能 ---
+# --- 7. 翻譯功能 (V94+ 中文化) ---
 def translate_text(text):
     if not text or text == "暫無詳細描述": return "暫無詳細描述"
     try:
