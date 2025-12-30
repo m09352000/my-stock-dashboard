@@ -1,19 +1,22 @@
 # ui_components.py
+# 視覺元件庫：負責繪圖、卡片渲染 (V110 修復版)
+
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import ui_styles
 
-def render_header(title, show_monitor=False):
+def render_header(title, is_live=False, time_str=""):
+    """
+    V110: Header 只負責顯示，控制權移交給 main.py
+    """
     ui_styles.inject_custom_css()
     c1, c2 = st.columns([3, 1])
     c1.title(title)
-    if show_monitor:
-        if 'monitor_active' not in st.session_state: st.session_state['monitor_active'] = False
-        if c2.toggle("🔴 1秒極速刷新", value=st.session_state['monitor_active']):
-            st.session_state['monitor_active'] = True
-        else:
-            st.session_state['monitor_active'] = False
+    
+    if is_live:
+        c2.markdown(f"<div style='text-align:right;'><span class='live-tag'>● LIVE 連線中</span><br><span style='font-size:0.8rem;color:#888'>{time_str}</span></div>", unsafe_allow_html=True)
+    
     st.markdown("<hr class='compact'>", unsafe_allow_html=True)
 
 def render_back_button(callback_func):
@@ -54,16 +57,19 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs
         val_color = "#FF2B2B" if chg > 0 else "#00E050" if chg < 0 else "white"
         c1.markdown(f"<div style='font-size:0.9rem; color:#aaa'>成交價</div><div style='font-size:2rem; font-weight:bold; color:{val_color}'>{curr:.2f} <span style='font-size:1rem'>({pct:+.2f}%)</span></div>", unsafe_allow_html=True)
         c2.metric("最高", f"{high:.2f}"); c3.metric("最低", f"{low:.2f}")
+        
         vol_str = f"{int(vol):,}"
         if unit == "股" and vol > 1000000: vol_str = f"{vol/1000000:.2f}M"
         c4.metric("成交量", f"{vol_str} {unit}")
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         d1, d2, d3, d4 = st.columns(4)
         d1.metric("振幅", f"{amp:.2f}%"); d2.metric("量能狀態", vs)
+        
         va_val = va if unit=="股" else va/1000
         va_str = f"{int(va_val):,}"
         if unit == "股" and va_val > 1000000: va_str = f"{va_val/1000000:.2f}M"
         d3.metric("五日均量", f"{va_str} {unit}")
+        
         vy_val = vy if unit=="股" else vy/1000
         vy_str = f"{int(vy_val):,}"
         if unit == "股" and vy_val > 1000000: vy_str = f"{vy_val/1000000:.2f}M"
@@ -76,9 +82,11 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
         chg_val = curr - prev; pct = (chg_val / prev) * 100
         if chg_val > 0: chg_color = "#FF2B2B"; pct_txt = f"▲{pct:.2f}%"
         elif chg_val < 0: chg_color = "#00E050"; pct_txt = f"▼{abs(pct):.2f}%"
+    
     rank_class = f"rank-{rank}" if rank and rank <= 3 else "rank-norm"
     rank_content = f"{rank}" if rank else "-"
     rank_html = f"<div class='rank-badge {rank_class}'>{rank_content}</div>"
+    
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns([0.6, 2.0, 1.2, 1.0])
         with c1: st.markdown(rank_html, unsafe_allow_html=True)
@@ -98,7 +106,7 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
             st.markdown(f"<div class='status-tag' style='background-color:{tag_color}; color:white; width:100%; margin-top:10px;'>{tag_text}</div>", unsafe_allow_html=True)
     return False
 
-# V110 修改：新增 key 參數，解決 DuplicateElementId
+# V110: 新增 key 參數，避免 ID 衝突
 def render_chart(df, title, color_settings, key=None):
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
@@ -109,6 +117,7 @@ def render_chart(df, title, color_settings, key=None):
     colors = ['#FF2B2B' if c >= o else '#00E050' for c, o in zip(df['Close'], df['Open'])]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=2, col=1)
     fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=10, b=10))
+    
     # 這裡傳入 key
     st.plotly_chart(fig, use_container_width=True, key=key)
 
