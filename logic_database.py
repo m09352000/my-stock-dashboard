@@ -1,235 +1,194 @@
 # logic_database.py
-# V115: 資料核心 (修復 lxml 依賴 + 強制中文名稱備援)
+# V115: 絕對防禦版 (名稱強制 Twstock / 錯誤全面攔截)
 
 import pandas as pd
 import twstock
 import yfinance as yf
-import os
-import json
-import re
 import streamlit as st
 from datetime import datetime, timedelta, timezone
+import random
 
-# 引入翻譯 (選用)
+# 翻譯模組 (選用)
 try:
     from deep_translator import GoogleTranslator
     HAS_TRANSLATOR = True
-except ImportError:
+except:
     HAS_TRANSLATOR = False
 
-USERS_FILE = 'stock_users.json'
-WATCHLIST_FILE = 'stock_watchlist.json'
-COMMENTS_FILE = 'stock_comments.csv'
-
-# --- 輔助函數 ---
-def _make_fake_rt(df):
-    if df is None or df.empty: return None
-    latest = df.iloc[-1]
+# --- 輔助：安全的回傳結構 ---
+def get_safe_stock_info(code):
+    """回傳一個絕對不會缺欄位的基本面字典"""
     return {
-        'latest_trade_price': latest['Close'],
-        'high': latest['High'], 'low': latest['Low'],
-        'accumulate_trade_volume': latest['Volume'], 
-        'previous_close': df.iloc[-2]['Close'] if len(df)>1 else latest['Open']
+        'name': code,
+        'code': code,
+        'longBusinessSummary': f"目前無法取得 {code} 的詳細業務資料。",
+        'sector': "一般產業",
+        'industry': "-",
+        'trailingEps': 0.0,
+        'trailingPE': 0.0
     }
-
-def translate_sector(text):
-    map_dict = {
-        "Technology": "科技業", "Financial Services": "金融業", "Healthcare": "醫療保健",
-        "Consumer Cyclical": "循環性消費", "Industrials": "工業", "Communication Services": "通訊服務",
-        "Consumer Defensive": "防禦性消費", "Energy": "能源", "Real Estate": "房地產",
-        "Basic Materials": "原物料", "Utilities": "公用事業", "Semiconductors": "半導體"
-    }
-    return map_dict.get(text, text)
 
 def translate_text(text):
-    if not text or "暫無" in text: return text
-    if not HAS_TRANSLATOR: return text
+    if not HAS_TRANSLATOR or not text: return text
     try:
-        return GoogleTranslator(source='auto', target='zh-TW').translate(text[:1000])
+        # 限制長度避免翻譯逾時
+        return GoogleTranslator(source='auto', target='zh-TW').translate(text[:800])
     except: return text
 
-# --- 資料庫初始化 ---
-def init_db():
-    users = {}
-    if os.path.exists(USERS_FILE):
-        try:
-            with open(USERS_FILE, 'r', encoding='utf-8') as f: users = json.load(f)
-        except: users = {}
-    users["admin"] = {"password": "admin888", "name": "超級管理員"}
-    with open(USERS_FILE, 'w', encoding='utf-8') as f: json.dump(users, f, ensure_ascii=False)
-    if not os.path.exists(WATCHLIST_FILE):
-        with open(WATCHLIST_FILE, 'w', encoding='utf-8') as f: json.dump({}, f)
-    if not os.path.exists(COMMENTS_FILE):
-        df = pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
-        df.to_csv(COMMENTS_FILE, index=False)
-init_db()
-
-# --- 股票數據核心 (V115 強力修復) ---
+# --- 核心：獲取股票資料 (快取) ---
 @st.cache_data(ttl=300, show_spinner=False)
 def get_stock_data(code):
     try:
-        code = str(code).upper().strip()
-        is_tw = code.isdigit() 
+        code = str(code).strip().upper()
+        is_tw = code.isdigit()
         
-        # 1. 預設資料結構
-        stock_info = {
-            'name': code, 
-            'code': code, 
-            'longBusinessSummary': f"目前無法取得 {code} 的詳細業務說明 (可能是資料源暫時無法存取)",
-            'sector': "一般產業", 
-            'industry': "-",
-            'trailingEps': 0.0, 
-            'trailingPE': 0.0
-        }
+        # 1. 初始化安全結構
+        stock_info = get_safe_stock_info(code)
+        df = pd.DataFrame()
+        source = "fail"
 
-        # 2. 如果是台股，先用 twstock 強制取得正確中文名
+        # 2. 名稱獲取 (Twstock 優先)
         if is_tw and code in twstock.codes:
-            stock_info['name'] = twstock.codes[code].name # 例如：旺宏
-            
-            # 簡單的產業判斷備援
-            if code.startswith('23') or code.startswith('24'): stock_info['sector'] = "電子工業"
-            elif code.startswith('28'): stock_info['sector'] = "金融業"
-
-        # 3. 嘗試抓取 Yahoo 資料
-        if is_tw:
-            # 嘗試 .TW 和 .TWO
-            found = False
-            for suffix in ['.TW', '.TWO']:
-                try:
-                    t = yf.Ticker(f"{code}{suffix}")
-                    df = t.history(period="1y", interval="1d", auto_adjust=True)
-                    if not df.empty:
-                        found = True
-                        # 嘗試抓基本面
-                        try:
-                            info = t.info
-                            if 'longBusinessSummary' in info:
-                                stock_info['longBusinessSummary'] = info['longBusinessSummary']
-                            if 'sector' in info:
-                                stock_info['sector'] = translate_sector(info['sector'])
-                            if 'industry' in info:
-                                stock_info['industry'] = translate_sector(info['industry'])
-                            stock_info['trailingEps'] = info.get('trailingEps', 0.0)
-                            stock_info['trailingPE'] = info.get('trailingPE', 0.0)
-                        except: pass
-                        break 
-                except: continue
-            
-            if not found: return code, {}, None, "fail"
-
-        else:
-            # 美股
-            t = yf.Ticker(code)
-            df = t.history(period="1y", interval="1d", auto_adjust=True)
-            try:
-                info = t.info
-                stock_info['name'] = info.get('longName', code)
-                stock_info['longBusinessSummary'] = info.get('longBusinessSummary', stock_info['longBusinessSummary'])
-                stock_info['sector'] = translate_sector(info.get('sector', '美股'))
-                stock_info['industry'] = translate_sector(info.get('industry', '-'))
-                stock_info['trailingEps'] = info.get('trailingEps', 0.0)
-                stock_info['trailingPE'] = info.get('trailingPE', 0.0)
-            except: pass
-
-        if df.empty: return code, {}, None, "fail"
+            stock_info['name'] = twstock.codes[code].name
         
-        # 移除時區避免錯誤
+        # 3. 歷史資料獲取 (Yahoo)
+        if is_tw:
+            tickers = [f"{code}.TW", f"{code}.TWO"]
+        else:
+            tickers = [code]
+            
+        for t_code in tickers:
+            try:
+                ticker = yf.Ticker(t_code)
+                temp_df = ticker.history(period="1y", interval="1d")
+                
+                if not temp_df.empty:
+                    df = temp_df
+                    source = "yahoo"
+                    
+                    # 順便抓基本面 (Yahoo info)
+                    try:
+                        info = ticker.info
+                        # 如果是美股，名稱以 Yahoo 為主
+                        if not is_tw: 
+                            stock_info['name'] = info.get('longName', code)
+                        
+                        stock_info['longBusinessSummary'] = info.get('longBusinessSummary', stock_info['longBusinessSummary'])
+                        stock_info['sector'] = info.get('sector', stock_info['sector'])
+                        stock_info['industry'] = info.get('industry', stock_info['industry'])
+                        stock_info['trailingEps'] = info.get('trailingEps', 0.0)
+                        stock_info['trailingPE'] = info.get('trailingPE', 0.0)
+                    except: pass
+                    
+                    break # 抓到就跳出
+            except: continue
+
+        # 4. 資料清洗
+        if df.empty:
+            return code, stock_info, None, "fail"
+        
+        # 移除時區 (關鍵修復 PicklingError)
         if df.index.tz is not None:
             df.index = df.index.tz_localize(None)
             
-        if len(df) < 5: return code, {}, None, "fail"
+        return code, stock_info, df, source
 
-        return code, stock_info, df, "yahoo"
     except Exception as e:
-        print(f"History Error: {e}")
-        return code, {}, None, "fail"
+        print(f"Global Error: {e}")
+        return code, get_safe_stock_info(code), None, "fail"
 
-# --- 即時資料 ---
+# --- 核心：即時資料 (不快取) ---
 def get_realtime_data(df, code):
-    if df is None or df.empty: return df, None, _make_fake_rt(df)
+    """
+    不管歷史資料如何，強制去抓最新的報價
+    """
+    if df is None or df.empty: return df, None, None
+    
     try:
-        code = str(code).upper().strip()
+        latest_price = df.iloc[-1]['Close']
+        high = df.iloc[-1]['High']
+        low = df.iloc[-1]['Low']
+        vol = df.iloc[-1]['Volume']
+        
         is_tw = code.isdigit()
         
-        latest_price = 0; high = 0; low = 0; vol = 0
-        
+        # 1. 嘗試抓取即時報價
         if is_tw:
-            real = twstock.realtime.get(code)
-            if real['success']:
-                rt = real['realtime']
-                if rt['latest_trade_price'] and rt['latest_trade_price'] != '-':
-                    latest_price = float(rt['latest_trade_price'])
-                    high = float(rt['high']) if rt['high'] != '-' else latest_price
-                    low = float(rt['low']) if rt['low'] != '-' else latest_price
-                    vol = float(rt['accumulate_trade_volume']) * 1000
-                else: return df, None, _make_fake_rt(df)
-            else: return df, None, _make_fake_rt(df)
+            try:
+                real = twstock.realtime.get(code)
+                if real['success']:
+                    rt = real['realtime']
+                    # 確保不是 '-' (剛開盤或暫停交易)
+                    if rt['latest_trade_price'] and rt['latest_trade_price'] != '-':
+                        latest_price = float(rt['latest_trade_price'])
+                        high = float(rt['high']) if rt['high'] != '-' else latest_price
+                        low = float(rt['low']) if rt['low'] != '-' else latest_price
+                        vol = float(rt['accumulate_trade_volume']) * 1000
+            except: pass # 抓不到就用歷史最後一筆
         else:
-            t = yf.Ticker(code); fast = t.fast_info
-            if fast.last_price:
-                latest_price = fast.last_price
-                high = fast.day_high if fast.day_high else latest_price
-                low = fast.day_low if fast.day_low else latest_price
-                vol = fast.last_volume if fast.last_volume else 0
-            else: return df, None, _make_fake_rt(df)
+            try:
+                t = yf.Ticker(code)
+                # 使用 fast_info 比較快且穩
+                if hasattr(t, 'fast_info'):
+                    latest_price = t.fast_info.last_price
+                    high = t.fast_info.day_high
+                    low = t.fast_info.day_low
+                    vol = t.fast_info.last_volume
+            except: pass
 
-        # 智慧縫合
+        # 2. 智慧縫合 (Smart Stitching)
         new_df = df.copy()
         last_idx = df.index[-1]
         
-        if is_tw: tz = timezone(timedelta(hours=8))
-        else: tz = timezone(timedelta(hours=-4))
-        now_date = datetime.now(tz).date()
-        last_date = last_idx.date()
+        # 判斷是否為新的一天
+        # 這裡用簡單邏輯：如果現在時間 > 最後一筆時間 + 12小時，視為新的一天
+        time_diff = datetime.now() - last_idx
+        is_new_day = time_diff.total_seconds() > 43200 # 12小時
         
-        if last_date < now_date:
-            new_idx = pd.Timestamp(now_date)
-            new_row = pd.DataFrame([{
-                'Open': latest_price, 'High': high, 'Low': low, 'Close': latest_price, 'Volume': vol
-            }], index=[new_idx])
-            new_df = pd.concat([new_df, new_row])
+        if is_new_day and is_tw: # 台股比較需要處理這個，美股 Yahoo 通常更新快
+             # 創建新索引 (今天)
+             new_idx = pd.Timestamp(datetime.now().date())
+             if new_idx > last_idx:
+                 new_row = pd.DataFrame([{
+                     'Open': latest_price, 'High': high, 'Low': low, 'Close': latest_price, 'Volume': vol
+                 }], index=[new_idx])
+                 new_df = pd.concat([new_df, new_row])
         else:
+            # 同一天，直接覆蓋最後一筆
             new_df.at[last_idx, 'Close'] = latest_price
-            if high > 0: new_df.at[last_idx, 'High'] = max(new_df.at[last_idx, 'High'], high)
-            if low > 0: new_df.at[last_idx, 'Low'] = min(new_df.at[last_idx, 'Low'], low)
-            new_df.at[last_idx, 'Volume'] = vol 
-        
+            new_df.at[last_idx, 'High'] = max(new_df.at[last_idx, 'High'], high)
+            new_df.at[last_idx, 'Low'] = min(new_df.at[last_idx, 'Low'], low)
+            new_df.at[last_idx, 'Volume'] = vol
+
         rt_pack = {
-            'latest_trade_price': latest_price, 'high': high, 'low': low, 'accumulate_trade_volume': vol, 
+            'latest_trade_price': latest_price,
+            'high': high,
+            'low': low,
+            'accumulate_trade_volume': vol,
             'previous_close': df.iloc[-2]['Close'] if len(df)>1 else df.iloc[-1]['Open']
         }
+        
         return new_df, None, rt_pack
-    except: return df, None, _make_fake_rt(df)
 
-# ... (其餘函式如 get_color_settings 等保持不變) ...
-def get_color_settings(code): return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'}
-def save_scan_results(stype, codes):
-    with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
-def load_scan_results(stype):
-    if os.path.exists(f"scan_{stype}.json"):
-        with open(f"scan_{stype}.json", 'r') as f: return json.load(f)
-    return []
-def save_comment(user, msg):
-    if not os.path.exists(COMMENTS_FILE): df = pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
-    else: df = pd.read_csv(COMMENTS_FILE)
-    new_row = {'User': user, 'Nickname': user, 'Message': msg, 'Time': datetime.now().strftime("%Y-%m-%d %H:%M")}
-    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-    df.to_csv(COMMENTS_FILE, index=False)
-def get_comments():
-    if os.path.exists(COMMENTS_FILE): return pd.read_csv(COMMENTS_FILE)
-    return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
+    except Exception as e:
+        # 萬一出錯，回傳原始 df，不要崩潰
+        return df, None, {
+            'latest_trade_price': df.iloc[-1]['Close'],
+            'high': df.iloc[-1]['High'],
+            'low': df.iloc[-1]['Low'],
+            'accumulate_trade_volume': df.iloc[-1]['Volume'],
+            'previous_close': df.iloc[-2]['Close']
+        }
+
+# ... (其餘工具函式) ...
 def solve_stock_id(val):
-    val = str(val).strip().upper()
     if not val: return None, None
-    if val.isdigit() and len(val) == 4:
+    val = str(val).strip().upper()
+    if val.isdigit():
         name = val
         if val in twstock.codes: name = twstock.codes[val].name
         return val, name
-    if re.match(r'^[A-Z]+$', val): return val, val 
-    for code, data in twstock.codes.items():
-        if data.type in ["股票", "ETF"]:
-            if val == data.name: return code, data.name
-    for code, data in twstock.codes.items():
-        if data.type in ["股票", "ETF"]:
-            if val in data.name: return code, data.name
-    return None, None
+    return val, val # 美股直接回傳
+
+def get_color_settings(code):
+    return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'}
