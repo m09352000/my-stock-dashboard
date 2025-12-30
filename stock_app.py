@@ -9,7 +9,7 @@ import logic_ai as ai
 import ui_components as ui
 import config_data as config
 
-st.set_page_config(page_title="全球股市戰情室", layout="wide", page_icon="🌎")
+st.set_page_config(page_title="全球股市戰情室 V106", layout="wide", page_icon="🌎")
 
 # --- Session 初始化 ---
 if 'market_type' not in st.session_state: st.session_state['market_type'] = 'TW'
@@ -81,15 +81,14 @@ with st.sidebar:
     if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
     
-    # 唯一的版本提示，放在最底下
-    st.caption("Ver: 105.0")
+    # 唯一的版本提示
+    st.caption("Ver: 106.0 (極速引擎版)")
 
 # --- 主頁面 ---
 mode = st.session_state['view_mode']
 m_type = st.session_state['market_type']
 
 if mode == 'welcome':
-    # 乾淨的歡迎頁面，移除囉唆的版本說明
     ui.render_header(f"👋 {m_type} 戰情室")
     if m_type == 'TW': st.info("🇹🇼 台股模式啟用")
     else: st.success("🇺🇸 美股模式啟用")
@@ -98,35 +97,63 @@ elif mode == 'analysis':
     code = st.session_state['current_stock']
     name = st.session_state['current_name']
     
+    # 1. 進入頁面先抓取一次歷史資料 (Heavy Load, Cached)
+    # 這裡改用 get_stock_data_history (V106 新函式)
+    fid, stock, df_hist, src = db.get_stock_data_history(code)
+    
     main_placeholder = st.empty()
-    with main_placeholder.container():
-        ui.render_header(f"{name} ({code})", show_monitor=True)
-        fid, stock, df, src = db.get_stock_data(code)
-        
-        if src == "fail":
-            st.error(f"⚠️ 無法取得 {code} 資料。")
-        else:
-            df, _, rt_pack = db.get_realtime_data(df, code)
+    
+    # 2. 刷新迴圈
+    # 如果資料抓取失敗，就不進迴圈
+    if src == "fail":
+        with main_placeholder.container():
+            ui.render_header(f"{name} ({code})")
+            st.error(f"⚠️ 無法取得 {code} 資料，請確認代號是否正確。")
+    else:
+        # 開始即時監控迴圈
+        while True:
+            # 取得即時資料並縫合 (Light Load)
+            df_display, _, rt_pack = db.get_realtime_data(df_hist, code)
             
-            curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]
-            chg = curr - prev; pct = (chg/prev)*100
-            high = df['High'].iloc[-1]; low = df['Low'].iloc[-1]
-            amp = ((high - low) / prev) * 100
-            vol = df['Volume'].iloc[-1]
-            vy = df['Volume'].iloc[-2]
-            va = df['Volume'].rolling(5).mean().iloc[-1]
-            vs = "爆量" if vol > vy*1.5 else "量縮" if vol < vy*0.6 else "正常"
+            with main_placeholder.container():
+                # 重新渲染介面 (header 會包含 1秒刷新按鈕)
+                is_live = ui.render_header(f"{name} ({code})", show_monitor=True)
+                
+                if df_display is not None:
+                    # 計算數據
+                    curr = df_display['Close'].iloc[-1]
+                    prev = df_display['Close'].iloc[-2]
+                    chg = curr - prev; pct = (chg/prev)*100
+                    high = df_display['High'].iloc[-1]; low = df_display['Low'].iloc[-1]
+                    amp = ((high - low) / prev) * 100
+                    vol = df_display['Volume'].iloc[-1]
+                    vy = df_display['Volume'].iloc[-2]
+                    va = df_display['Volume'].rolling(5).mean().iloc[-1]
+                    vs = "爆量" if vol > vy*1.5 else "量縮" if vol < vy*0.6 else "正常"
+                    
+                    unit = "股" if not code.isdigit() else "張"
+                    vol_disp = vol if unit == "股" else vol/1000
+                    
+                    info = stock.info.get('longBusinessSummary', '')
+                    ui.render_company_profile(db.translate_text(info))
+                    
+                    # 儀表板
+                    ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, "一般", vol_disp, vy, va, vs, 0, 0, None, None, rt_pack, unit=unit, code=code)
+                    
+                    # K線圖 (使用已更新最新價的 df_display)
+                    ui.render_chart(df_display, f"{name} K線圖", db.get_color_settings(code))
+                    
+                    # AI 診斷
+                    battle = ai.analyze_stock_battle_data(df_display)
+                    if battle: ui.render_ai_battle_dashboard(battle)
+                else:
+                    st.warning("數據載入中...")
+
+            # 迴圈控制
+            if not st.session_state.get('monitor_active', False):
+                break # 如果沒開直播，跑一次就停
             
-            unit = "股" if not code.isdigit() else "張"
-            vol_disp = vol if unit == "股" else vol/1000
-            
-            info = stock.info.get('longBusinessSummary', '')
-            ui.render_company_profile(db.translate_text(info))
-            ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, "一般", vol_disp, vy, va, vs, 0, 0, None, None, rt_pack, unit=unit, code=code)
-            ui.render_chart(df, f"{name} K線圖", db.get_color_settings(code))
-            
-            battle = ai.analyze_stock_battle_data(df)
-            if battle: ui.render_ai_battle_dashboard(battle)
+            time.sleep(1) # 休息1秒再刷
 
     ui.render_back_button(lambda: nav_to('welcome'))
 
@@ -153,7 +180,8 @@ elif mode == 'scan':
             if count >= limit: break
             bar.progress(min((count+1)/limit, 1.0))
             try:
-                _, _, df, src = db.get_stock_data(c)
+                # 掃描也使用新的 cache 函式，加快重複掃描速度
+                _, _, df, src = db.get_stock_data_history(c)
                 if df is not None and len(df) > 30:
                     battle = ai.analyze_stock_battle_data(df)
                     score = battle['score']
@@ -203,7 +231,7 @@ elif mode == 'scan':
     ui.render_back_button(lambda: nav_to('welcome'))
 
 elif mode == 'learn':
-    ui.render_header("📖 股市新手村")
+    ui.render_header("📖 股市新手村 (終極詳解版)")
     t1, t2, t3 = st.tabs(["策略解密", "名詞百科", "K線戰法 SOP"])
     with t1: st.markdown(config.STRATEGY_DESC)
     with t2:
@@ -211,12 +239,12 @@ elif mode == 'learn':
             with st.expander(cat, expanded=True):
                 for k, v in items.items(): ui.render_term_card(k, v)
     with t3:
-        st.info("💡 K 線反轉訊號與操作 SOP")
+        st.info("💡 這裡收錄了最經典的 K 線反轉訊號，並附上完整的操作 SOP。請熟讀！")
         c1, c2 = st.columns(2)
         with c1:
-            st.subheader("🔥 多方訊號")
+            st.subheader("🔥 多方訊號 (看漲)")
             for k, v in config.KLINE_PATTERNS.get('bull', {}).items(): ui.render_kline_pattern_card(k, v)
         with c2:
-            st.subheader("❄️ 空方訊號")
+            st.subheader("❄️ 空方訊號 (看跌)")
             for k, v in config.KLINE_PATTERNS.get('bear', {}).items(): ui.render_kline_pattern_card(k, v)
     ui.render_back_button(lambda: nav_to('welcome'))
