@@ -1,16 +1,16 @@
 # logic_database.py
-# V112: 資料核心 (修復 lxml, re, Pickling, 資料同步)
+# V114: 資料核心 (名稱備援 + 強力抓取 + 翻譯修復)
 
 import pandas as pd
 import twstock
 import yfinance as yf
 import os
 import json
-import re  # <--- 補上了！
+import re
 import streamlit as st
 from datetime import datetime, timedelta, timezone
 
-# 嘗試引入翻譯，沒有也沒關係
+# 引入翻譯
 try:
     from deep_translator import GoogleTranslator
     HAS_TRANSLATOR = True
@@ -20,15 +20,6 @@ except ImportError:
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
 COMMENTS_FILE = 'stock_comments.csv'
-
-# --- 中文翻譯對照表 ---
-SECTOR_MAP = {
-    "Technology": "科技業", "Financial Services": "金融業", "Healthcare": "醫療保健",
-    "Consumer Cyclical": "循環性消費", "Industrials": "工業", "Communication Services": "通訊服務",
-    "Consumer Defensive": "防禦性消費", "Energy": "能源", "Real Estate": "房地產",
-    "Basic Materials": "原物料", "Utilities": "公用事業", "Semiconductors": "半導體",
-    "Electronic Components": "電子零組件", "Computer Hardware": "電腦硬體"
-}
 
 # --- 輔助函數 ---
 def _make_fake_rt(df):
@@ -41,11 +32,21 @@ def _make_fake_rt(df):
         'previous_close': df.iloc[-2]['Close'] if len(df)>1 else latest['Open']
     }
 
+def translate_sector(text):
+    map_dict = {
+        "Technology": "科技業", "Financial Services": "金融業", "Healthcare": "醫療保健",
+        "Consumer Cyclical": "循環性消費", "Industrials": "工業", "Communication Services": "通訊服務",
+        "Consumer Defensive": "防禦性消費", "Energy": "能源", "Real Estate": "房地產",
+        "Basic Materials": "原物料", "Utilities": "公用事業", "Semiconductors": "半導體"
+    }
+    return map_dict.get(text, text)
+
 def translate_text(text):
-    if not HAS_TRANSLATOR or not text: return text
+    if not text or text.startswith("暫無"): return text
+    if not HAS_TRANSLATOR: return text
     try:
-        # 簡單翻譯前 500 字，避免卡住
-        return GoogleTranslator(source='auto', target='zh-TW').translate(text[:500])
+        # 翻譯前 1000 字，避免過長
+        return GoogleTranslator(source='auto', target='zh-TW').translate(text[:1000])
     except: return text
 
 # --- 資料庫初始化 ---
@@ -64,27 +65,25 @@ def init_db():
         df.to_csv(COMMENTS_FILE, index=False)
 init_db()
 
-# --- 股票數據核心 ---
+# --- 股票數據核心 (V114: 名稱與基本面強力備援) ---
 @st.cache_data(ttl=300, show_spinner=False)
 def get_stock_data(code):
     try:
         code = str(code).upper().strip()
         is_tw = code.isdigit() 
-        
-        # 使用字典回傳，避免物件序列化錯誤
         stock_info = {
             'name': code, 'code': code, 
-            'longBusinessSummary': f"暫無 {code} 詳細描述",
-            'sector': "一般", 'industry': "-",
+            'longBusinessSummary': f"暫無 {code} 詳細資料",
+            'sector': "-", 'industry': "-",
             'trailingEps': 0.0, 'trailingPE': 0.0
         }
 
         if is_tw:
-            name = code
-            if code in twstock.codes: name = twstock.codes[code].name
-            stock_info['name'] = name
+            # 1. 先用 twstock 查中文名稱 (最準)
+            if code in twstock.codes:
+                stock_info['name'] = twstock.codes[code].name
             
-            # 優先嘗試 .TW
+            # 2. 嘗試抓取 Yahoo 歷史與基本面
             found = False
             for suffix in ['.TW', '.TWO']:
                 try:
@@ -92,11 +91,14 @@ def get_stock_data(code):
                     df = t.history(period="1y", interval="1d", auto_adjust=True)
                     if not df.empty:
                         found = True
+                        # 嘗試抓取 info (不保證成功，所以用 try 包起來)
                         try:
                             info = t.info
-                            stock_info['longBusinessSummary'] = info.get('longBusinessSummary', f"{name} 為台灣上市公司")
-                            stock_info['sector'] = SECTOR_MAP.get(info.get('sector'), info.get('sector', '台股'))
-                            stock_info['industry'] = SECTOR_MAP.get(info.get('industry'), info.get('industry', '一般'))
+                            # 如果 Yahoo 有給名稱，且不是英文，就用 Yahoo 的 (通常 twstock 比較準)
+                            # 這裡主要抓基本面
+                            stock_info['longBusinessSummary'] = info.get('longBusinessSummary', stock_info['longBusinessSummary'])
+                            stock_info['sector'] = translate_sector(info.get('sector', '-'))
+                            stock_info['industry'] = translate_sector(info.get('industry', '-'))
                             stock_info['trailingEps'] = info.get('trailingEps', 0.0)
                             stock_info['trailingPE'] = info.get('trailingPE', 0.0)
                         except: pass
@@ -113,18 +115,14 @@ def get_stock_data(code):
                 info = t.info
                 stock_info['name'] = info.get('longName', code)
                 stock_info['longBusinessSummary'] = info.get('longBusinessSummary', '美股企業資料')
-                stock_info['sector'] = SECTOR_MAP.get(info.get('sector'), info.get('sector', '美股'))
-                stock_info['industry'] = SECTOR_MAP.get(info.get('industry'), info.get('industry', '-'))
+                stock_info['sector'] = translate_sector(info.get('sector', '美股'))
+                stock_info['industry'] = translate_sector(info.get('industry', '-'))
                 stock_info['trailingEps'] = info.get('trailingEps', 0.0)
                 stock_info['trailingPE'] = info.get('trailingPE', 0.0)
             except: pass
 
         if df.empty: return code, {}, None, "fail"
-        
-        # 關鍵修復：移除時區資訊，解決 PicklingError
-        if df.index.tz is not None:
-            df.index = df.index.tz_localize(None)
-            
+        if df.index.tz is not None: df.index = df.index.tz_localize(None)
         if len(df) < 5: return code, {}, None, "fail"
 
         return code, stock_info, df, "yahoo"
@@ -132,7 +130,7 @@ def get_stock_data(code):
         print(f"History Error: {e}")
         return code, {}, None, "fail"
 
-# --- 即時資料同步 (V112 強制更新) ---
+# --- 即時資料 ---
 def get_realtime_data(df, code):
     if df is None or df.empty: return df, None, _make_fake_rt(df)
     try:
@@ -161,16 +159,25 @@ def get_realtime_data(df, code):
                 vol = fast.last_volume if fast.last_volume else 0
             else: return df, None, _make_fake_rt(df)
 
-        # 暴力同步：直接更新 DataFrame
         new_df = df.copy()
         last_idx = df.index[-1]
         
-        # 不管日期，只要有最新價，就強制覆蓋最後一筆 Close
-        # 這樣圖表上的最後一個點才會跟著大數字跳動
-        new_df.at[last_idx, 'Close'] = latest_price
-        new_df.at[last_idx, 'High'] = max(new_df.at[last_idx, 'High'], high)
-        new_df.at[last_idx, 'Low'] = min(new_df.at[last_idx, 'Low'], low)
-        new_df.at[last_idx, 'Volume'] = vol
+        if is_tw: tz = timezone(timedelta(hours=8))
+        else: tz = timezone(timedelta(hours=-4))
+        now_date = datetime.now(tz).date()
+        last_date = last_idx.date()
+        
+        if last_date < now_date:
+            new_idx = pd.Timestamp(now_date)
+            new_row = pd.DataFrame([{
+                'Open': latest_price, 'High': high, 'Low': low, 'Close': latest_price, 'Volume': vol
+            }], index=[new_idx])
+            new_df = pd.concat([new_df, new_row])
+        else:
+            new_df.at[last_idx, 'Close'] = latest_price
+            if high > 0: new_df.at[last_idx, 'High'] = max(new_df.at[last_idx, 'High'], high)
+            if low > 0: new_df.at[last_idx, 'Low'] = min(new_df.at[last_idx, 'Low'], low)
+            new_df.at[last_idx, 'Volume'] = vol 
         
         rt_pack = {
             'latest_trade_price': latest_price, 'high': high, 'low': low, 'accumulate_trade_volume': vol, 
@@ -179,8 +186,8 @@ def get_realtime_data(df, code):
         return new_df, None, rt_pack
     except: return df, None, _make_fake_rt(df)
 
-# ... (維持原樣的函式) ...
 def get_color_settings(code): return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'}
+def translate_text_placeholder(text): return text # 舊版相容
 def save_scan_results(stype, codes):
     with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
 def load_scan_results(stype):
