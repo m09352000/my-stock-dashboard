@@ -11,6 +11,7 @@ import importlib
 from datetime import datetime, time as dt_time, timedelta, timezone
 import difflib 
 
+# --- V90: 安全引入機制 (防爆核心) ---
 try:
     import cv2
     import numpy as np
@@ -21,6 +22,7 @@ except ImportError:
 import stock_db as db
 import stock_ui as ui
 
+# 載入知識庫
 try:
     import knowledge
     importlib.reload(knowledge)
@@ -30,6 +32,7 @@ except:
 
 st.set_page_config(page_title="AI 股市戰情室 V95", layout="wide")
 
+# --- 通用字串比對函式 ---
 def find_best_match_stock_v90(text):
     garbage = ["試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存", "延遲", "放一", "一些", "一", "二", "三", "R", "G", "B"]
     clean_text = text.upper()
@@ -54,6 +57,7 @@ def find_best_match_stock_v90(text):
         if abs(len(best) - len(clean_text)) <= 2: return name_to_code[best], best
     return None, None
 
+# --- V90: 雙模式影像處理引擎 ---
 def process_image_upload(image_file):
     debug_info = {"raw_text": "", "processed_img": None, "error": None}
     found_stocks = set(); full_ocr_log = ""
@@ -199,7 +203,7 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; st.query_params.clear(); nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 95.0 (混合雙引擎・真實籌碼)")
+    st.markdown("---"); st.caption("Ver: 95.1 (FinMind 修正版)")
 
 mode = st.session_state['view_mode']
 
