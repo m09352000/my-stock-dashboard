@@ -1,5 +1,5 @@
 # stock_app.py
-# V122: 主程式 (解決殘留畫面、錯誤處理優化)
+# V2.0: FinMind 全面升級版
 
 import streamlit as st
 import time
@@ -12,7 +12,7 @@ import logic_ai as ai
 import ui_components as ui
 import config_data as config
 
-st.set_page_config(page_title="全球股市戰情室 V122", layout="wide", page_icon="🌎")
+st.set_page_config(page_title="全球股市戰情室 V2.0 (FinMind)", layout="wide", page_icon="📈")
 
 # --- Session 初始化 ---
 if 'market_type' not in st.session_state: st.session_state['market_type'] = 'TW'
@@ -20,13 +20,9 @@ if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome
 if 'current_stock' not in st.session_state: st.session_state['current_stock'] = ''
 if 'current_name' not in st.session_state: st.session_state['current_name'] = ''
 if 'scan_results' not in st.session_state: st.session_state['scan_results'] = []
-if 'scan_pool_tw' not in st.session_state:
-    try:
-        import twstock
-        all_codes = [c for c in twstock.codes.values() if c.type in ["股票", "ETF"]]
-        st.session_state['scan_pool_tw'] = sorted([c.code for c in all_codes])
-    except:
-        st.session_state['scan_pool_tw'] = ['2330', '2317', '2454']
+
+# 主要容器 (防止畫面殘留)
+main_container = st.container()
 
 def nav_to(mode, code=None, name=None):
     if code: 
@@ -35,216 +31,112 @@ def nav_to(mode, code=None, name=None):
     st.session_state['view_mode'] = mode
 
 def handle_search():
-    try:
-        val = st.session_state.search_input_val
+    val = st.session_state.search_input_val
+    if val:
         code, name = db.solve_stock_id(val)
-        if code:
-            nav_to('analysis', code, name)
-            st.session_state.search_input_val = ""
-        else:
-            st.toast(f"找不到 '{val}'，請確認代號或名稱", icon="⚠️")
-    except Exception as e:
-        st.error(f"搜尋發生錯誤: {e}")
+        nav_to('analysis', code, name)
+        st.session_state.search_input_val = ""
 
 # --- 側邊欄 ---
 with st.sidebar:
-    st.title("🎮 戰情控制台")
-    market = st.radio("🌍 選擇戰情室", ["🇹🇼 台股戰情室", "🇺🇸 美股戰情室"], index=0 if st.session_state['market_type']=='TW' else 1)
-    st.session_state['market_type'] = 'TW' if "台股" in market else 'US'
+    st.title("📈 戰情控制台")
+    mode_sw = st.radio("市場", ["🇹🇼 台股 (FinMind)", "🇺🇸 美股"], index=0)
+    st.session_state['market_type'] = 'TW' if "台股" in mode_sw else 'US'
+    
+    st.text_input("🔍 搜尋代號", key="search_input_val", on_change=handle_search)
     
     st.divider()
-    ph = "輸入代號 (2330)" if st.session_state['market_type'] == 'TW' else "輸入代號 (NVDA)"
-    st.text_input("🔍 搜尋", placeholder=ph, key="search_input_val", on_change=handle_search)
-    
-    with st.container(border=True):
-        st.markdown(f"### 🤖 {st.session_state['market_type']} AI 掃描")
-        if st.session_state['market_type'] == 'TW':
-            try:
-                import twstock
-                groups = sorted(list(set(c.group for c in twstock.codes.values() if c.type in ["股票", "ETF"] and c.group)))
-                all_groups = ["全部上市櫃"] + groups
-            except: all_groups = ["全部上市櫃"]
-            sel_group = st.selectbox("1️⃣ 範圍", all_groups)
-        else:
-            sel_group = st.selectbox("1️⃣ 範圍", ["🔥 美股熱門百大"])
-
-        strat_map = {"🌅 明日之星潛力股": "tomorrow_star", "💎 超強力推薦必賺": "super_win", "⚡ 強力當沖": "day", "📈 穩健短線": "short", "🏆 熱門強勢": "top"}
-        sel_strat_name = st.selectbox("2️⃣ 策略", list(strat_map.keys()))
-        scan_limit = st.slider("3️⃣ 上限", 10, 100, 30)
+    if st.button("🚀 啟動 AI 掃描"):
+        st.session_state['scan_results'] = [] # 這裡可以串接 FinMind 篩選邏輯
+        st.info("FinMind 掃描功能開發中...")
         
-        if st.button("🚀 啟動掃描", use_container_width=True):
-            st.session_state['scan_target_group'] = sel_group
-            st.session_state['current_stock'] = strat_map[sel_strat_name]
-            st.session_state['scan_limit'] = scan_limit
-            st.session_state['scan_results'] = []
-            nav_to('scan', strat_map[sel_strat_name])
-            st.rerun()
-
     st.divider()
-    if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
-    if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.caption("Ver: 122.0 (修復版)")
+    if st.button("📖 股市新手村"): nav_to('learn')
+    if st.button("🏠 回首頁"): nav_to('welcome')
 
-# --- 主程式 ---
-# 建立一個主要的容器，之後所有內容都 render 在這裡
-main_container = st.container()
-
-mode = st.session_state['view_mode']
-m_type = st.session_state['market_type']
-
+# --- 主畫面 ---
 with main_container:
+    mode = st.session_state['view_mode']
+    
     if mode == 'welcome':
-        ui.render_header(f"👋 {m_type} 戰情室")
-        if m_type == 'TW': st.info("🇹🇼 台股模式啟用：資料來源 Twstock / Voidful / Yahoo Finance")
-        else: st.success("🇺🇸 美股模式啟用：資料來源 Yahoo Finance")
+        ui.render_header("👋 歡迎來到股市戰情室 V2.0")
+        st.success("✅ 核心引擎已升級為 FinMind (台灣開源金融數據)")
+        st.info("✅ 股市新手村內容已全面擴充")
 
     elif mode == 'analysis':
         code = st.session_state['current_stock']
         name = st.session_state['current_name']
-        col_h, col_t = st.columns([3, 1])
-        with col_h: st.subheader(f"{name} ({code})")
-        with col_t: monitor = st.toggle("🔴 1秒極速刷新", key="monitor_toggle")
-
+        
+        col_title, col_toggle = st.columns([3, 1])
+        with col_title: st.subheader(f"{code} 個股分析")
+        with col_toggle: monitor = st.toggle("🔴 即時連線", value=True)
+        
+        # 取得資料 (FinMind)
         fid, stock_info, df_hist, src = db.get_stock_data(code)
         
-        # 建立動態刷新區塊
         dynamic_placeholder = st.empty()
         
-        if src == "fail":
-            st.error(f"⚠️ 無法取得 {code} 資料，請確認代號是否正確。")
+        if src == 'fail':
+            st.error(f"無法取得 {code} 資料 (FinMind & Backup 均無數據)")
         else:
-            # 只有在 Monitor 開啟時才跑迴圈，否則只跑一次
             first_run = True
             while first_run or monitor:
                 first_run = False
+                
+                # 取得即時 (FinMind Snapshot)
                 df_display, _, rt_pack = db.get_realtime_data(df_hist, code)
                 
                 with dynamic_placeholder.container():
-                    tz = timezone(timedelta(hours=8)) if m_type == 'TW' else timezone(timedelta(hours=-4))
+                    tz = timezone(timedelta(hours=8))
                     now_str = datetime.now(tz).strftime('%H:%M:%S')
                     ui.render_header("", is_live=monitor, time_str=now_str)
                     
                     if df_display is not None and not df_display.empty:
                         curr = df_display['Close'].iloc[-1]
-                        prev = df_display['Close'].iloc[-2]
-                        chg = curr - prev; pct = (chg/prev)*100
-                        high = df_display['High'].iloc[-1]; low = df_display['Low'].iloc[-1]
-                        amp = ((high - low) / prev) * 100
-                        vol = df_display['Volume'].iloc[-1]
-                        vy = df_display['Volume'].iloc[-2]
-                        va = df_display['Volume'].rolling(5).mean().iloc[-1]
-                        vs = "爆量" if vol > vy*1.5 else "量縮" if vol < vy*0.6 else "正常"
+                        prev = df_display['Close'].iloc[-2] if len(df_display) > 1 else curr
+                        chg = curr - prev
+                        pct = (chg / prev) * 100 if prev != 0 else 0
                         
-                        unit = "股" if not code.isdigit() else "張"
-                        vol_disp = vol if unit == "股" else vol/1000
+                        vol = df_display['Volume'].iloc[-1]
                         
                         ui.render_fundamental_panel(stock_info)
-                        ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, "一般", vol_disp, vy, va, vs, 0, 0, None, None, rt_pack, unit=unit, code=code)
+                        ui.render_metrics_dashboard(curr, chg, pct, df_display['High'].iloc[-1], df_display['Low'].iloc[-1], 0, 0, vol, 0, 0, "正常", 0, 0, 0, 0, rt_pack, code=code)
+                        ui.render_chart(df_display, f"{code} K線圖", {}, key=f"chart_{time.time()}")
                         
-                        chart_key = f"chart_{code}_{int(time.time())}"
-                        ui.render_chart(df_display, f"{name} K線圖", db.get_color_settings(code), key=chart_key)
-                        
+                        # AI 分析
                         battle = ai.analyze_stock_battle_data(df_display)
                         if battle: ui.render_ai_battle_dashboard(battle)
                     else:
-                        st.warning("數據載入中...")
-
-                if not monitor: break
-                time.sleep(1)
-
-        ui.render_back_button(lambda: nav_to('welcome'))
-
-    elif mode == 'scan':
-        stype = st.session_state['current_stock']
-        target = st.session_state.get('scan_target_group', '全部')
-        title_map = {'tomorrow_star': '🌅 明日之星', 'super_win': '💎 超強力必賺', 'day': '⚡ 強力當沖'}
-        ui.render_header(f"🤖 {m_type} {target} ⨉ {title_map.get(stype, stype)}")
-        
-        display_list = st.session_state.get('scan_results', [])
-        
-        if not display_list:
-            if m_type == 'TW':
-                pool = st.session_state['scan_pool_tw']
-                if target != "全部上市櫃": 
-                    try:
-                        import twstock
-                        pool = [c for c in pool if c in twstock.codes and twstock.codes[c].group == target]
-                    except: pass
-            else: pool = config.US_STOCK_POOL
-            
-            limit = st.session_state.get('scan_limit', 30)
-            bar = st.progress(0); raw_results = []; count = 0
-            
-            for i, c in enumerate(pool):
-                if count >= limit: break
-                bar.progress(min((count+1)/limit, 1.0))
-                try:
-                    _, _, df, src = db.get_stock_data(c)
-                    if df is not None and len(df) > 30:
-                        battle = ai.analyze_stock_battle_data(df)
-                        score = battle['score']
-                        w_prob = battle['weekly_prob']
-                        
-                        close = df['Close'].iloc[-1]; open_p = df['Open'].iloc[-1]
-                        high = df['High'].iloc[-1]; vol = df['Volume'].iloc[-1]
-                        vol_ma5 = df['Volume'].rolling(5).mean().iloc[-1]
-                        ma5 = df['Close'].rolling(5).mean().iloc[-1]
-                        
-                        scan_reason = ai.generate_scan_reason(df)
-                        valid = False
-                        
-                        if stype == 'tomorrow_star':
-                            if close > open_p and close > high * 0.985 and vol > vol_ma5 and close > ma5: valid = True; score += 10
-                        elif stype == 'super_win':
-                            if score >= 60: valid = True
-                        elif stype == 'day':
-                            if vol > df['Volume'].iloc[-2]*1.5: valid = True
-                        elif stype == 'short':
-                            if score >= 40: valid = True
-                        elif stype == 'top':
-                             thresh = 2000 if m_type == 'TW' else 1000000 
-                             if vol > thresh: valid = True
-                             
-                        if valid:
-                            n = c
-                            if m_type == 'TW':
-                                try:
-                                    import twstock
-                                    if c in twstock.codes: n = twstock.codes[c].name
-                                except: pass
-                            raw_results.append({'c': c, 'n': n, 'p': close, 'info': scan_reason, 'score': score, 'w_prob': w_prob, 'd': df, 'src': src})
-                            count += 1
-                    time.sleep(0.01)
-                except: pass
+                        st.warning("數據讀取中...")
                 
-            bar.empty()
-            raw_results.sort(key=lambda x: x['score'], reverse=True)
-            st.session_state['scan_results'] = raw_results
-            display_list = raw_results
-
-        if display_list:
-            st.success(f"已篩選出 {len(display_list)} 檔標的")
-            for i, item in enumerate(display_list):
-                if ui.render_detailed_card(item['c'], item['n'], item['p'], item['d'], item['src'], key_prefix=f"scan_{stype}", rank=i+1, strategy_info=item['info'], score=item['score'], w_prob=item.get('w_prob', 50)): 
-                    nav_to('analysis', item['c'], item['n']); st.rerun()
-        else: st.warning("無符合條件標的")
-        ui.render_back_button(lambda: nav_to('welcome'))
+                if not monitor: break
+                time.sleep(3) # FinMind 建議間隔稍長一點避免頻率限制
 
     elif mode == 'learn':
-        ui.render_header("📖 股市新手村")
-        t1, t2, t3 = st.tabs(["策略解密", "名詞百科", "K線戰法 SOP"])
-        with t1: st.markdown(config.STRATEGY_DESC)
+        ui.render_header("📖 股市新手村 (百科全書版)")
+        t1, t2, t3 = st.tabs(["⚔️ 策略心法", "📚 股市百科", "📈 K線戰法"])
+        
+        with t1:
+            st.markdown(config.STRATEGY_DESC)
+            
         with t2:
             for cat, items in config.STOCK_TERMS.items():
                 with st.expander(cat, expanded=True):
-                    for k, v in items.items(): ui.render_term_card(k, v)
+                    for k, v in items.items():
+                        st.markdown(f"#### {k}")
+                        st.markdown(v)
+                        st.divider()
+                        
         with t3:
-            st.info("💡 這裡收錄了最經典的 K 線反轉訊號，並附上完整的操作 SOP。")
+            st.info("💡 經典反轉型態 SOP")
             c1, c2 = st.columns(2)
             with c1:
-                st.subheader("🔥 多方訊號 (看漲)")
-                for k, v in config.KLINE_PATTERNS.get('bull', {}).items(): ui.render_kline_pattern_card(k, v)
+                st.subheader("🔥 多方訊號")
+                for k, v in config.KLINE_PATTERNS.get('bull', {}).items():
+                    ui.render_kline_pattern_card(k, v)
             with c2:
-                st.subheader("❄️ 空方訊號 (看跌)")
-                for k, v in config.KLINE_PATTERNS.get('bear', {}).items(): ui.render_kline_pattern_card(k, v)
+                st.subheader("❄️ 空方訊號")
+                for k, v in config.KLINE_PATTERNS.get('bear', {}).items():
+                    ui.render_kline_pattern_card(k, v)
+                    
         ui.render_back_button(lambda: nav_to('welcome'))
