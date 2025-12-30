@@ -309,7 +309,7 @@ elif mode == 'analysis':
                 summary = db.translate_text(info.get('longBusinessSummary',''))
                 ui.render_company_profile(summary)
                 
-                ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf_str, vt, vy, va, vs, fh, turnover_rate, bid_ask, color_settings, rt_pack, stock_info=info, df=df, chip_data=chip_data)
+                ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf_str, vt, vy, va, vs, fh, turnover, bid_ask, color_settings, rt_pack, stock_info=info, df=df, chip_data=chip_data)
                 ui.render_chart(df, f"{name} K線圖", color_settings)
                 
                 m5 = df['Close'].rolling(5).mean().iloc[-1]; m20 = df['Close'].rolling(20).mean().iloc[-1]; m60 = df['Close'].rolling(60).mean().iloc[-1]
@@ -319,12 +319,16 @@ elif mode == 'analysis':
                 ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df, chip_data=chip_data)
             ui.render_back_button(go_back)
             return is_live
+
+    # --- 關鍵修正：迴圈縮排 ---
     is_live_mode = render_content()
     if is_live_mode:
-        while True: time.sleep(1); still_live = render_content(); 
-        if not still_live: break
+        while True: 
+            time.sleep(1)
+            still_live = render_content() 
+            if not still_live: 
+                break
 
-# 其他頁面邏輯維持不變 (Learn, Chat, Scan) ...
 elif mode == 'learn':
     ui.render_header("📖 股市新手村"); t1, t2, t3 = st.tabs(["策略說明", "名詞解釋", "🕯️ K線型態"])
     with t1: st.markdown(STRATEGY_DESC)
@@ -353,8 +357,6 @@ elif mode == 'chat':
     ui.render_back_button(go_back)
 
 elif mode == 'scan': 
-    # Scan 功能需要針對 yfinance 做部分調整，但為了避免過於複雜，這裡維持 V90 邏輯
-    # 建議後續針對 scan 做深度優化
     stype = st.session_state['current_stock']; target_group = st.session_state.get('scan_target_group', '全部')
     title_map = {'day': '⚡ 強力當沖', 'short': '📈 穩健短線', 'long': '🐢 長線安穩', 'top': '🏆 熱門強勢'}
     ui.render_header(f"🤖 {target_group} ⨉ {title_map.get(stype, stype)}")
