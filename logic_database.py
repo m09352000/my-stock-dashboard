@@ -1,5 +1,5 @@
 # logic_database.py
-# 資料處理核心：負責抓取股票資料、快取機制
+# 資料處理核心：負責抓取股票資料、快取機制 (修復序列化問題)
 
 import pandas as pd
 import twstock
@@ -33,51 +33,51 @@ def init_db():
 
 init_db()
 
-# --- 股票數據核心 (V107 修正版：防呆 + 快取) ---
-# 設定 TTL=300秒，歷史 K 線 5 分鐘更新一次即可
+# --- 股票數據核心 (修正版) ---
 @st.cache_data(ttl=300, show_spinner=False)
 def get_stock_data(code):
     """
     抓取歷史 K 線資料 (Heavy Load, Cached)
+    修正：回傳 dictionary 而非物件，避免 PicklingError
     """
     try:
         code = str(code).upper().strip()
         is_tw = code.isdigit() 
         
-        class FakeStockInfo:
-            def __init__(self, code, name):
-                self.info = {'name': name, 'code': code, 'longBusinessSummary': f"{name} ({code}) - 資料來源: Yahoo Finance"}
+        # 使用字典代替類別實例
+        stock_info = {'name': code, 'code': code, 'longBusinessSummary': f"{code} - 資料來源: Yahoo Finance"}
 
         if is_tw:
             name = code
             if code in twstock.codes: name = twstock.codes[code].name
-            fake_stock = FakeStockInfo(code, name)
+            stock_info['name'] = name
+            stock_info['longBusinessSummary'] = f"{name} ({code}) - 台股資料"
+            
             df = yf.download(f"{code}.TW", period="1y", interval="1d", progress=False)
             if df.empty: df = yf.download(f"{code}.TWO", period="1y", interval="1d", progress=False)
         else:
-            fake_stock = FakeStockInfo(code, code) 
             try:
                 t = yf.Ticker(code); info = t.info
                 if 'longName' in info:
-                    fake_stock.info['name'] = info['longName']
-                    fake_stock.info['longBusinessSummary'] = info.get('longBusinessSummary', '美股企業資料')
+                    stock_info['name'] = info['longName']
+                    stock_info['longBusinessSummary'] = info.get('longBusinessSummary', '美股企業資料')
             except: pass
             df = yf.download(code, period="1y", interval="1d", progress=False)
 
-        if df.empty: return code, None, None, "fail"
+        if df.empty: return code, {}, None, "fail"
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         df.index = pd.to_datetime(df.index)
         
-        if len(df) < 5: return code, None, None, "fail"
+        if len(df) < 5: return code, {}, None, "fail"
 
-        return code, fake_stock, df, "yahoo"
+        return code, stock_info, df, "yahoo"
     except Exception as e:
         print(f"History Error: {e}")
-        return code, None, None, "fail"
+        return code, {}, None, "fail"
 
 def get_realtime_data(df, code):
     """
-    抓取即時報價並與歷史資料縫合 (Light Load)
+    抓取即時報價並與歷史資料縫合
     """
     if df is None or df.empty: return df, None, None
     
@@ -106,7 +106,6 @@ def get_realtime_data(df, code):
                 vol = fast.last_volume if fast.last_volume else 0
             else: return _merge_fake_rt(df)
 
-        # 縫合手術
         new_df = df.copy()
         last_idx = df.index[-1]
         
