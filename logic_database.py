@@ -1,5 +1,5 @@
 # logic_database.py
-# V114: 資料核心 (名稱備援 + 強力抓取 + 翻譯修復)
+# V115: 資料核心 (修復 lxml 依賴 + 強制中文名稱備援)
 
 import pandas as pd
 import twstock
@@ -10,7 +10,7 @@ import re
 import streamlit as st
 from datetime import datetime, timedelta, timezone
 
-# 引入翻譯
+# 引入翻譯 (選用)
 try:
     from deep_translator import GoogleTranslator
     HAS_TRANSLATOR = True
@@ -42,10 +42,9 @@ def translate_sector(text):
     return map_dict.get(text, text)
 
 def translate_text(text):
-    if not text or text.startswith("暫無"): return text
+    if not text or "暫無" in text: return text
     if not HAS_TRANSLATOR: return text
     try:
-        # 翻譯前 1000 字，避免過長
         return GoogleTranslator(source='auto', target='zh-TW').translate(text[:1000])
     except: return text
 
@@ -65,25 +64,35 @@ def init_db():
         df.to_csv(COMMENTS_FILE, index=False)
 init_db()
 
-# --- 股票數據核心 (V114: 名稱與基本面強力備援) ---
+# --- 股票數據核心 (V115 強力修復) ---
 @st.cache_data(ttl=300, show_spinner=False)
 def get_stock_data(code):
     try:
         code = str(code).upper().strip()
         is_tw = code.isdigit() 
+        
+        # 1. 預設資料結構
         stock_info = {
-            'name': code, 'code': code, 
-            'longBusinessSummary': f"暫無 {code} 詳細資料",
-            'sector': "-", 'industry': "-",
-            'trailingEps': 0.0, 'trailingPE': 0.0
+            'name': code, 
+            'code': code, 
+            'longBusinessSummary': f"目前無法取得 {code} 的詳細業務說明 (可能是資料源暫時無法存取)",
+            'sector': "一般產業", 
+            'industry': "-",
+            'trailingEps': 0.0, 
+            'trailingPE': 0.0
         }
 
-        if is_tw:
-            # 1. 先用 twstock 查中文名稱 (最準)
-            if code in twstock.codes:
-                stock_info['name'] = twstock.codes[code].name
+        # 2. 如果是台股，先用 twstock 強制取得正確中文名
+        if is_tw and code in twstock.codes:
+            stock_info['name'] = twstock.codes[code].name # 例如：旺宏
             
-            # 2. 嘗試抓取 Yahoo 歷史與基本面
+            # 簡單的產業判斷備援
+            if code.startswith('23') or code.startswith('24'): stock_info['sector'] = "電子工業"
+            elif code.startswith('28'): stock_info['sector'] = "金融業"
+
+        # 3. 嘗試抓取 Yahoo 資料
+        if is_tw:
+            # 嘗試 .TW 和 .TWO
             found = False
             for suffix in ['.TW', '.TWO']:
                 try:
@@ -91,14 +100,15 @@ def get_stock_data(code):
                     df = t.history(period="1y", interval="1d", auto_adjust=True)
                     if not df.empty:
                         found = True
-                        # 嘗試抓取 info (不保證成功，所以用 try 包起來)
+                        # 嘗試抓基本面
                         try:
                             info = t.info
-                            # 如果 Yahoo 有給名稱，且不是英文，就用 Yahoo 的 (通常 twstock 比較準)
-                            # 這裡主要抓基本面
-                            stock_info['longBusinessSummary'] = info.get('longBusinessSummary', stock_info['longBusinessSummary'])
-                            stock_info['sector'] = translate_sector(info.get('sector', '-'))
-                            stock_info['industry'] = translate_sector(info.get('industry', '-'))
+                            if 'longBusinessSummary' in info:
+                                stock_info['longBusinessSummary'] = info['longBusinessSummary']
+                            if 'sector' in info:
+                                stock_info['sector'] = translate_sector(info['sector'])
+                            if 'industry' in info:
+                                stock_info['industry'] = translate_sector(info['industry'])
                             stock_info['trailingEps'] = info.get('trailingEps', 0.0)
                             stock_info['trailingPE'] = info.get('trailingPE', 0.0)
                         except: pass
@@ -114,7 +124,7 @@ def get_stock_data(code):
             try:
                 info = t.info
                 stock_info['name'] = info.get('longName', code)
-                stock_info['longBusinessSummary'] = info.get('longBusinessSummary', '美股企業資料')
+                stock_info['longBusinessSummary'] = info.get('longBusinessSummary', stock_info['longBusinessSummary'])
                 stock_info['sector'] = translate_sector(info.get('sector', '美股'))
                 stock_info['industry'] = translate_sector(info.get('industry', '-'))
                 stock_info['trailingEps'] = info.get('trailingEps', 0.0)
@@ -122,7 +132,11 @@ def get_stock_data(code):
             except: pass
 
         if df.empty: return code, {}, None, "fail"
-        if df.index.tz is not None: df.index = df.index.tz_localize(None)
+        
+        # 移除時區避免錯誤
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+            
         if len(df) < 5: return code, {}, None, "fail"
 
         return code, stock_info, df, "yahoo"
@@ -159,6 +173,7 @@ def get_realtime_data(df, code):
                 vol = fast.last_volume if fast.last_volume else 0
             else: return df, None, _make_fake_rt(df)
 
+        # 智慧縫合
         new_df = df.copy()
         last_idx = df.index[-1]
         
@@ -186,6 +201,7 @@ def get_realtime_data(df, code):
         return new_df, None, rt_pack
     except: return df, None, _make_fake_rt(df)
 
+# ... (其餘函式如 get_color_settings 等保持不變) ...
 def get_color_settings(code): return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'}
 def save_scan_results(stype, codes):
     with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
