@@ -1,5 +1,5 @@
 # logic_database.py
-# 資料處理核心：負責抓取股票資料、快取機制 (修復序列化問題)
+# V109: 資料核心 (字典化傳輸 + 輔助函數前置)
 
 import pandas as pd
 import twstock
@@ -12,6 +12,21 @@ from datetime import datetime
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
 COMMENTS_FILE = 'stock_comments.csv'
+
+# --- 輔助函數 (移至最上方防止 NameError) ---
+def _make_fake_rt(df):
+    """
+    當抓不到即時資料時，使用歷史資料的最後一筆來偽裝
+    """
+    if df is None or df.empty: return None
+    latest = df.iloc[-1]
+    return {
+        'latest_trade_price': latest['Close'],
+        'high': latest['High'],
+        'low': latest['Low'],
+        'accumulate_trade_volume': latest['Volume'], 
+        'previous_close': df.iloc[-2]['Close'] if len(df)>1 else latest['Open']
+    }
 
 # --- 資料庫初始化 ---
 def init_db():
@@ -33,19 +48,23 @@ def init_db():
 
 init_db()
 
-# --- 股票數據核心 (修正版) ---
+# --- 股票數據核心 (使用 Cache) ---
 @st.cache_data(ttl=300, show_spinner=False)
 def get_stock_data(code):
     """
-    抓取歷史 K 線資料 (Heavy Load, Cached)
-    修正：回傳 dictionary 而非物件，避免 PicklingError
+    抓取歷史 K 線資料 (Heavy Load)
+    回傳：(code, stock_info_dict, df, source)
     """
     try:
         code = str(code).upper().strip()
         is_tw = code.isdigit() 
         
-        # 使用字典代替類別實例
-        stock_info = {'name': code, 'code': code, 'longBusinessSummary': f"{code} - 資料來源: Yahoo Finance"}
+        # 改用純字典 (Dictionary)，避免 PicklingError
+        stock_info = {
+            'name': code, 
+            'code': code, 
+            'longBusinessSummary': f"{code} - 資料來源: Yahoo Finance"
+        }
 
         if is_tw:
             name = code
@@ -56,15 +75,18 @@ def get_stock_data(code):
             df = yf.download(f"{code}.TW", period="1y", interval="1d", progress=False)
             if df.empty: df = yf.download(f"{code}.TWO", period="1y", interval="1d", progress=False)
         else:
+            # 美股嘗試抓取詳細名稱
             try:
-                t = yf.Ticker(code); info = t.info
-                if 'longName' in info:
-                    stock_info['name'] = info['longName']
-                    stock_info['longBusinessSummary'] = info.get('longBusinessSummary', '美股企業資料')
+                t = yf.Ticker(code)
+                # 這裡不呼叫 t.info 避免過慢，僅在必要時使用
+                # 但為了基本名稱，嘗試一次
+                stock_info['name'] = code # 預設
             except: pass
             df = yf.download(code, period="1y", interval="1d", progress=False)
 
         if df.empty: return code, {}, None, "fail"
+        
+        # 資料清洗
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         df.index = pd.to_datetime(df.index)
         
@@ -79,7 +101,7 @@ def get_realtime_data(df, code):
     """
     抓取即時報價並與歷史資料縫合
     """
-    if df is None or df.empty: return df, None, None
+    if df is None or df.empty: return df, None, _make_fake_rt(df)
     
     try:
         code = str(code).upper().strip()
@@ -95,8 +117,8 @@ def get_realtime_data(df, code):
                     latest_price = float(rt['latest_trade_price'])
                     high = float(rt['high']); low = float(rt['low'])
                     vol = float(rt['accumulate_trade_volume']) * 1000
-                else: return _merge_fake_rt(df)
-            else: return _merge_fake_rt(df)
+                else: return df, None, _make_fake_rt(df)
+            else: return df, None, _make_fake_rt(df)
         else:
             t = yf.Ticker(code); fast = t.fast_info
             if fast.last_price:
@@ -104,8 +126,9 @@ def get_realtime_data(df, code):
                 high = fast.day_high if fast.day_high else latest_price
                 low = fast.day_low if fast.day_low else latest_price
                 vol = fast.last_volume if fast.last_volume else 0
-            else: return _merge_fake_rt(df)
+            else: return df, None, _make_fake_rt(df)
 
+        # 縫合手術
         new_df = df.copy()
         last_idx = df.index[-1]
         
@@ -120,14 +143,6 @@ def get_realtime_data(df, code):
         }
         return new_df, None, rt_pack
     except: return df, None, _make_fake_rt(df)
-
-def _merge_fake_rt(df):
-    latest = df.iloc[-1]
-    rt_pack = {
-        'latest_trade_price': latest['Close'], 'high': latest['High'], 'low': latest['Low'],
-        'accumulate_trade_volume': latest['Volume'], 'previous_close': df.iloc[-2]['Close'] if len(df)>1 else latest['Open']
-    }
-    return df, None, rt_pack
 
 def get_color_settings(code):
     return {'up': '#FF2B2B', 'down': '#00E050', 'delta': 'inverse'}
