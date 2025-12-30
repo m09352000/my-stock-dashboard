@@ -1,5 +1,5 @@
 # stock_app.py
-# V2.0: FinMind 全面升級版
+# V3.0: FinMind 全面升級版 (修復掃描錯誤)
 
 import streamlit as st
 import time
@@ -12,16 +12,15 @@ import logic_ai as ai
 import ui_components as ui
 import config_data as config
 
-st.set_page_config(page_title="全球股市戰情室 V2.0 (FinMind)", layout="wide", page_icon="📈")
+st.set_page_config(page_title="全球股市戰情室 V3.0", layout="wide", page_icon="📈")
 
-# --- Session 初始化 ---
+# Session 初始化
 if 'market_type' not in st.session_state: st.session_state['market_type'] = 'TW'
 if 'view_mode' not in st.session_state: st.session_state['view_mode'] = 'welcome'
 if 'current_stock' not in st.session_state: st.session_state['current_stock'] = ''
 if 'current_name' not in st.session_state: st.session_state['current_name'] = ''
-if 'scan_results' not in st.session_state: st.session_state['scan_results'] = []
 
-# 主要容器 (防止畫面殘留)
+# 主要容器
 main_container = st.container()
 
 def nav_to(mode, code=None, name=None):
@@ -44,11 +43,15 @@ with st.sidebar:
     st.session_state['market_type'] = 'TW' if "台股" in mode_sw else 'US'
     
     st.text_input("🔍 搜尋代號", key="search_input_val", on_change=handle_search)
-    
     st.divider()
-    if st.button("🚀 啟動 AI 掃描"):
-        st.session_state['scan_results'] = [] # 這裡可以串接 FinMind 篩選邏輯
-        st.info("FinMind 掃描功能開發中...")
+    
+    # 掃描功能 (先做簡單版，避免 FinMind 流量限制)
+    st.markdown("### 🤖 AI 掃描")
+    sel_strat = st.selectbox("策略", ["🌅 明日之星", "💎 超強力必賺"])
+    if st.button("🚀 啟動掃描 (測試)"):
+        st.toast("為避免 FinMind 流量超限，目前僅展示範例。", icon="🛡️")
+        st.session_state['scan_results'] = [{'c':'2330','n':'台積電','p':1000,'info':'均線多頭','score':90}]
+        nav_to('scan')
         
     st.divider()
     if st.button("📖 股市新手村"): nav_to('learn')
@@ -59,9 +62,9 @@ with main_container:
     mode = st.session_state['view_mode']
     
     if mode == 'welcome':
-        ui.render_header("👋 歡迎來到股市戰情室 V2.0")
-        st.success("✅ 核心引擎已升級為 FinMind (台灣開源金融數據)")
-        st.info("✅ 股市新手村內容已全面擴充")
+        ui.render_header("👋 歡迎來到股市戰情室 V3.0")
+        st.success("✅ 核心引擎已升級為 FinMind")
+        st.info("✅ 股市新手村內容已全面修復")
 
     elif mode == 'analysis':
         code = st.session_state['current_stock']
@@ -71,19 +74,15 @@ with main_container:
         with col_title: st.subheader(f"{code} 個股分析")
         with col_toggle: monitor = st.toggle("🔴 即時連線", value=True)
         
-        # 取得資料 (FinMind)
         fid, stock_info, df_hist, src = db.get_stock_data(code)
-        
         dynamic_placeholder = st.empty()
         
         if src == 'fail':
-            st.error(f"無法取得 {code} 資料 (FinMind & Backup 均無數據)")
+            st.error(f"無法取得 {code} 資料")
         else:
             first_run = True
             while first_run or monitor:
                 first_run = False
-                
-                # 取得即時 (FinMind Snapshot)
                 df_display, _, rt_pack = db.get_realtime_data(df_hist, code)
                 
                 with dynamic_placeholder.container():
@@ -96,29 +95,23 @@ with main_container:
                         prev = df_display['Close'].iloc[-2] if len(df_display) > 1 else curr
                         chg = curr - prev
                         pct = (chg / prev) * 100 if prev != 0 else 0
-                        
                         vol = df_display['Volume'].iloc[-1]
                         
                         ui.render_fundamental_panel(stock_info)
                         ui.render_metrics_dashboard(curr, chg, pct, df_display['High'].iloc[-1], df_display['Low'].iloc[-1], 0, 0, vol, 0, 0, "正常", 0, 0, 0, 0, rt_pack, code=code)
                         ui.render_chart(df_display, f"{code} K線圖", {}, key=f"chart_{time.time()}")
                         
-                        # AI 分析
                         battle = ai.analyze_stock_battle_data(df_display)
                         if battle: ui.render_ai_battle_dashboard(battle)
-                    else:
-                        st.warning("數據讀取中...")
+                    else: st.warning("數據讀取中...")
                 
                 if not monitor: break
-                time.sleep(3) # FinMind 建議間隔稍長一點避免頻率限制
+                time.sleep(3)
 
     elif mode == 'learn':
         ui.render_header("📖 股市新手村 (百科全書版)")
         t1, t2, t3 = st.tabs(["⚔️ 策略心法", "📚 股市百科", "📈 K線戰法"])
-        
-        with t1:
-            st.markdown(config.STRATEGY_DESC)
-            
+        with t1: st.markdown(config.STRATEGY_DESC)
         with t2:
             for cat, items in config.STOCK_TERMS.items():
                 with st.expander(cat, expanded=True):
@@ -126,8 +119,7 @@ with main_container:
                         st.markdown(f"#### {k}")
                         st.markdown(v)
                         st.divider()
-                        
-        with t3:
+        with t3: # 這裡之前會報錯，現在修好了
             st.info("💡 經典反轉型態 SOP")
             c1, c2 = st.columns(2)
             with c1:
@@ -138,5 +130,13 @@ with main_container:
                 st.subheader("❄️ 空方訊號")
                 for k, v in config.KLINE_PATTERNS.get('bear', {}).items():
                     ui.render_kline_pattern_card(k, v)
-                    
+        ui.render_back_button(lambda: nav_to('welcome'))
+        
+    elif mode == 'scan': # 這裡之前也會報錯
+        ui.render_header("🤖 AI 掃描結果")
+        results = st.session_state.get('scan_results', [])
+        for i, item in enumerate(results):
+            if ui.render_detailed_card(item['c'], item['n'], item['p'], None, 'FinMind', 'scan', i+1, item['info'], item['score'], 90):
+                nav_to('analysis', item['c'], item['n'])
+                st.rerun()
         ui.render_back_button(lambda: nav_to('welcome'))
