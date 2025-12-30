@@ -9,7 +9,7 @@ import logic_ai as ai
 import ui_components as ui
 import config_data as config
 
-st.set_page_config(page_title="全球股市戰情室 V108", layout="wide", page_icon="🌎")
+st.set_page_config(page_title="全球股市戰情室 V109", layout="wide", page_icon="🌎")
 
 # --- Session 初始化 ---
 if 'market_type' not in st.session_state: st.session_state['market_type'] = 'TW'
@@ -80,15 +80,14 @@ with st.sidebar:
     st.divider()
     if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    
-    st.caption("Ver: 108.0 (模組化終極修復)")
+    st.caption("Ver: 109.0 (快取修復版)")
 
 # --- 主程式 ---
 mode = st.session_state['view_mode']
 m_type = st.session_state['market_type']
 
 if mode == 'welcome':
-    ui.render_header(f"👋 {m_type} 戰情室")
+    ui.render_header(f"👋 {m_type} 戰情室 V109")
     if m_type == 'TW': st.info("🇹🇼 台股模式啟用")
     else: st.success("🇺🇸 美股模式啟用")
 
@@ -96,7 +95,7 @@ elif mode == 'analysis':
     code = st.session_state['current_stock']
     name = st.session_state['current_name']
     
-    # 修正重點：接收 dict 格式的 stock_info
+    # 1. 抓取歷史 (回傳 dict 資訊)
     fid, stock_info, df_hist, src = db.get_stock_data(code)
     
     main_placeholder = st.empty()
@@ -107,6 +106,7 @@ elif mode == 'analysis':
             st.error(f"⚠️ 無法取得 {code} 資料。")
     else:
         while True:
+            # 2. 抓取即時並縫合
             df_display, _, rt_pack = db.get_realtime_data(df_hist, code)
             
             with main_placeholder.container():
@@ -126,7 +126,7 @@ elif mode == 'analysis':
                     unit = "股" if not code.isdigit() else "張"
                     vol_disp = vol if unit == "股" else vol/1000
                     
-                    # 修正：直接從 dict 取得資料，不需 .info
+                    # 這裡修改為從 dict 讀取
                     info_text = stock_info.get('longBusinessSummary', '')
                     ui.render_company_profile(db.translate_text(info_text))
                     
@@ -166,6 +166,7 @@ elif mode == 'scan':
             if count >= limit: break
             bar.progress(min((count+1)/limit, 1.0))
             try:
+                # 掃描也使用 cached 函數
                 _, _, df, src = db.get_stock_data(c)
                 if df is not None and len(df) > 30:
                     battle = ai.analyze_stock_battle_data(df)
@@ -216,7 +217,7 @@ elif mode == 'scan':
     ui.render_back_button(lambda: nav_to('welcome'))
 
 elif mode == 'learn':
-    ui.render_header("📖 股市新手村")
+    ui.render_header("📖 股市新手村 (終極詳解版)")
     t1, t2, t3 = st.tabs(["策略解密", "名詞百科", "K線戰法 SOP"])
     with t1: st.markdown(config.STRATEGY_DESC)
     with t2:
