@@ -9,7 +9,7 @@ import logic_ai as ai
 import ui_components as ui
 import config_data as config
 
-st.set_page_config(page_title="全球股市戰情室 V110", layout="wide", page_icon="🌎")
+st.set_page_config(page_title="全球股市戰情室 V111", layout="wide", page_icon="🌎")
 
 # --- Session 初始化 ---
 if 'market_type' not in st.session_state: st.session_state['market_type'] = 'TW'
@@ -80,7 +80,7 @@ with st.sidebar:
     st.divider()
     if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.caption("Ver: 110.0 (同步修復版)")
+    st.caption("Ver: 111.0 (全功能回歸版)")
 
 # --- 主程式 ---
 mode = st.session_state['view_mode']
@@ -95,12 +95,11 @@ elif mode == 'analysis':
     code = st.session_state['current_stock']
     name = st.session_state['current_name']
     
-    # V110 修正：Toggle 移出迴圈
     col_h, col_t = st.columns([3, 1])
     with col_h: st.subheader(f"{name} ({code})")
     with col_t: monitor = st.toggle("🔴 1秒極速刷新", key="monitor_toggle")
 
-    # 1. 抓取歷史 (Cache)
+    # 1. 抓取歷史與基本面 (Cache)
     fid, stock_info, df_hist, src = db.get_stock_data(code)
     
     main_placeholder = st.empty()
@@ -109,11 +108,11 @@ elif mode == 'analysis':
         st.error(f"⚠️ 無法取得 {code} 資料。")
     else:
         while True:
-            # 2. 抓取即時並縫合 (Light)
+            # 2. 抓取即時 (Realtime Fetch)
             df_display, _, rt_pack = db.get_realtime_data(df_hist, code)
             
             with main_placeholder.container():
-                # 時間字串
+                # 顯示時間
                 tz = timezone(timedelta(hours=8)) if m_type == 'TW' else timezone(timedelta(hours=-4))
                 now_str = datetime.now(tz).strftime('%H:%M:%S')
                 ui.render_header("", is_live=monitor, time_str=now_str)
@@ -132,12 +131,11 @@ elif mode == 'analysis':
                     unit = "股" if not code.isdigit() else "張"
                     vol_disp = vol if unit == "股" else vol/1000
                     
-                    info_text = stock_info.get('longBusinessSummary', '')
-                    ui.render_company_profile(db.translate_text(info_text))
+                    # V111: 改為顯示「基本面透視面板」
+                    ui.render_fundamental_panel(stock_info)
                     
                     ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, "一般", vol_disp, vy, va, vs, 0, 0, None, None, rt_pack, unit=unit, code=code)
                     
-                    # V110 修正：傳入 dynamic key 解決 DuplicateElementId
                     chart_key = f"chart_{code}_{int(time.time())}"
                     ui.render_chart(df_display, f"{name} K線圖", db.get_color_settings(code), key=chart_key)
                     
@@ -151,8 +149,8 @@ elif mode == 'analysis':
 
     ui.render_back_button(lambda: nav_to('welcome'))
 
+# (Scan, Learn 頁面維持不變，請保留 V110 的程式碼)
 elif mode == 'scan':
-    # (此部分完全保留，請參考上一輪回答，若您手上的版本已經正確則無需更動)
     stype = st.session_state['current_stock']
     target = st.session_state.get('scan_target_group', '全部')
     title_map = {'tomorrow_star': '🌅 明日之星', 'super_win': '💎 超強力必賺', 'day': '⚡ 強力當沖'}
@@ -225,7 +223,7 @@ elif mode == 'scan':
     ui.render_back_button(lambda: nav_to('welcome'))
 
 elif mode == 'learn':
-    ui.render_header("📖 股市新手村 (終極詳解版)")
+    ui.render_header("📖 股市新手村")
     t1, t2, t3 = st.tabs(["策略解密", "名詞百科", "K線戰法 SOP"])
     with t1: st.markdown(config.STRATEGY_DESC)
     with t2:
