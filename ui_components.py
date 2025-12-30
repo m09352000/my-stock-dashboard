@@ -1,5 +1,5 @@
 # ui_components.py
-# V119: 視覺元件庫 (介面隱藏空內容優化)
+# V120: 視覺元件庫 (新增五檔報價視覺化)
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -19,10 +19,7 @@ def render_fundamental_panel(stock_info):
     name = stock_info.get('name', '未知個股')
     code = stock_info.get('code', '')
     summary_raw = stock_info.get('longBusinessSummary', '')
-    
-    # 進行翻譯
     summary_zh = db.translate_text(summary_raw)
-    
     sector = stock_info.get('sector', '-')
     industry = stock_info.get('industry', '-')
     eps = stock_info.get('trailingEps', 0.0)
@@ -33,35 +30,28 @@ def render_fundamental_panel(stock_info):
         with c_main:
             st.markdown(f"### 🏢 {name} ({code}) 企業概況")
             st.caption(f"板塊: {sector} | 產業: {industry}")
-            
-            # --- V119 修改：內容檢測 ---
-            # 只有當真的有內容時，才顯示 Expander
-            # 這樣當 logic_database 回傳空字串時，這裡就會自動隱藏，保持版面乾淨
             if summary_zh and len(str(summary_zh)) > 5:
                 with st.expander("📖 查看業務介紹 (中文)", expanded=True): 
                     st.write(summary_zh)
-            # -------------------------
-
         with c_info:
             eps_val = f"{eps}" if eps != 0 else "-"
             pe_val = f"{pe:.2f}" if pe != 0 else "-"
             st.metric("EPS (每股盈餘)", eps_val)
             st.metric("P/E (本益比)", pe_val)
 
-def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs, fh, tr, ba, cs, rt, unit="張", code=""):
+def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs, fh, tr, ba, cs, rt_pack, unit="張", code=""):
     with st.container():
+        # --- 第一列：主要價格 ---
         c1, c2, c3, c4 = st.columns(4)
         val_color = "#FF2B2B" if chg > 0 else "#00E050" if chg < 0 else "white"
-        
         c1.markdown(f"<div style='font-size:0.9rem; color:#aaa'>成交價</div><div style='font-size:2.5rem; font-weight:bold; color:{val_color};'>{curr:.2f}</div><div style='font-size:1.2rem; color:{val_color}'>{chg:+.2f} ({pct:+.2f}%)</div>", unsafe_allow_html=True)
-        
         c2.metric("最高", f"{high:.2f}")
         c3.metric("最低", f"{low:.2f}")
-        
         vol_str = f"{int(vol):,}"
         if unit == "股" and vol > 1000000: vol_str = f"{vol/1000000:.2f}M"
         c4.metric("成交量", f"{vol_str} {unit}")
         
+        # --- 第二列：進階量能 ---
         st.markdown("<hr class='compact'>", unsafe_allow_html=True)
         d1, d2, d3, d4 = st.columns(4)
         d1.metric("振幅", f"{amp:.2f}%")
@@ -73,13 +63,47 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, mf, vol, vy, va, vs
         if unit == "張": vy_str = f"{int(vy/1000):,}"
         d4.metric("昨日量", f"{vy_str}")
 
+        # --- 🌟 第三列：五檔報價 (MIS 獨家功能) ---
+        b_p = rt_pack.get('bid_price', [])
+        b_v = rt_pack.get('bid_volume', [])
+        a_p = rt_pack.get('ask_price', [])
+        a_v = rt_pack.get('ask_volume', [])
+
+        if b_p and a_p:
+            st.markdown("<hr class='compact'>", unsafe_allow_html=True)
+            st.caption("📊 五檔委託即時明細 (資料來源: 臺灣證券交易所 MIS)")
+            
+            col_buy, col_mid, col_sell = st.columns([1, 0.1, 1])
+            
+            # 買單 (紅色)
+            with col_buy:
+                st.markdown("<h5 style='text-align:center; color:#FF2B2B'>🔴 委買 (Bid)</h5>", unsafe_allow_html=True)
+                for p, v in zip(b_p, b_v):
+                    st.markdown(f"""
+                    <div style='display:flex; justify-content:space-between; border-bottom:1px solid #333; padding:2px;'>
+                        <span style='color:#FF2B2B; font-weight:bold;'>{p}</span>
+                        <span style='color:#EEE;'>{v} 張</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            # 賣單 (綠色) - 順序通常是價格低的在下，高的在上，這裡我們簡單列出
+            with col_sell:
+                st.markdown("<h5 style='text-align:center; color:#00E050'>🟢 委賣 (Ask)</h5>", unsafe_allow_html=True)
+                for p, v in zip(a_p, a_v):
+                    st.markdown(f"""
+                    <div style='display:flex; justify-content:space-between; border-bottom:1px solid #333; padding:2px;'>
+                        <span style='color:#00E050; font-weight:bold;'>{p}</span>
+                        <span style='color:#EEE;'>{v} 張</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            # 如果是盤後或美股沒有五檔
+            pass
+
 def render_chart(df, title, color_settings, key=None):
     if key is None: key = "chart_default"
-    # 防呆
-    if len(df) > 5:
-        df['MA5'] = df['Close'].rolling(5).mean()
-    if len(df) > 20:
-        df['MA20'] = df['Close'].rolling(20).mean()
+    if len(df) > 5: df['MA5'] = df['Close'].rolling(5).mean()
+    if len(df) > 20: df['MA20'] = df['Close'].rolling(20).mean()
         
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
     fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K線', increasing_line_color='#FF2B2B', decreasing_line_color='#00E050'), row=1, col=1)
