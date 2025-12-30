@@ -1,4 +1,6 @@
 # logic_database.py
+# V110: 資料核心 (智慧縫合架構)
+
 import pandas as pd
 import twstock
 import yfinance as yf
@@ -71,6 +73,9 @@ def get_stock_data(code):
         return code, {}, None, "fail"
 
 def get_realtime_data(df, code):
+    """
+    V110: 智慧縫合 - 自動判斷是否為新的一天
+    """
     if df is None or df.empty: return df, None, _make_fake_rt(df)
     
     try:
@@ -99,33 +104,33 @@ def get_realtime_data(df, code):
                 vol = fast.last_volume if fast.last_volume else 0
             else: return df, None, _make_fake_rt(df)
 
-        # 2. 智慧縫合邏輯 (V110 核心修正)
+        # 2. 智慧縫合邏輯 (V110 核心)
         new_df = df.copy()
         last_idx = df.index[-1]
-        
-        # 判斷日期：如果歷史資料的最後一筆 < 今天，代表要新增一筆
-        # 注意時區：這裡簡單比對日期
-        # 台股時區
-        tz = timezone(timedelta(hours=8)) if is_tw else timezone(timedelta(hours=-4)) # 簡單美股時區
-        now_date = datetime.now(tz).date()
         last_date = last_idx.date()
         
+        # 取得當下日期 (注意時區)
+        if is_tw:
+            tz = timezone(timedelta(hours=8))
+            now_date = datetime.now(tz).date()
+        else:
+            # 美股簡單用 UTC-4 (美東)
+            tz = timezone(timedelta(hours=-4))
+            now_date = datetime.now(tz).date()
+        
         if last_date < now_date:
-            # 這是新的一天！新增一筆 Row
+            # 這是新的一天！新增一筆 K 棒
             new_idx = pd.Timestamp(now_date)
-            # 開高低收量：暫時用 latest_price 填充，後續會被更新
-            # Open 用 latest, High/Low 用 high/low from realtime
-            new_row = pd.Series({
-                'Open': latest_price, # 暫定，理想是 open from realtime
+            new_row = pd.DataFrame([{
+                'Open': latest_price, # 暫用最新價當開盤
                 'High': high,
                 'Low': low,
                 'Close': latest_price,
                 'Volume': vol
-            }, name=new_idx)
-            # 使用 pd.concat 加到底部
-            new_df = pd.concat([new_df, new_row.to_frame().T])
+            }], index=[new_idx])
+            new_df = pd.concat([new_df, new_row])
         else:
-            # 還是同一天，更新最後一筆
+            # 同一天，更新最後一筆
             new_df.at[last_idx, 'Close'] = latest_price
             new_df.at[last_idx, 'High'] = max(new_df.at[last_idx, 'High'], high)
             new_df.at[last_idx, 'Low'] = min(new_df.at[last_idx, 'Low'], low)
