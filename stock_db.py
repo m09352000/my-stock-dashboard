@@ -5,7 +5,7 @@ import os
 import json
 from datetime import datetime
 
-# --- V92: 資料庫核心 (Yahoo Finance 修復版) ---
+# --- V93: 資料庫核心 (Yahoo Finance 穩定版) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -20,7 +20,6 @@ def init_db():
                 users = json.load(f)
         except: users = {}
     
-    # 強制重置管理員
     users["admin"] = {"password": "admin888", "name": "超級管理員"}
     
     with open(USERS_FILE, 'w', encoding='utf-8') as f:
@@ -88,42 +87,39 @@ def update_watchlist(username, code, action="add"):
         return True
     except: return False
 
-# --- 4. 股票數據 (改用 yfinance 修復查無資料問題) ---
+# --- 4. 股票數據 (V93: 雙軌偵測引擎) ---
 def get_stock_data(code):
     try:
-        # 自動判斷後綴 (上市.TW / 上櫃.TWO)
         ticker = None
         df = pd.DataFrame()
         
-        # 1. 嘗試直接搜尋 (支援美股或已帶後綴代號)
-        candidates = [code]
-        
-        # 2. 如果是純數字 (台股)，優先嘗試 .TW，其次 .TWO
-        if code.isdigit():
-            candidates = [f"{code}.TW", f"{code}.TWO"]
+        # 智慧判斷：先試 .TW (上市)，若無資料再試 .TWO (上櫃)
+        candidates = [f"{code}.TW", f"{code}.TWO"] if code.isdigit() else [code]
             
         for c in candidates:
             try:
                 temp_ticker = yf.Ticker(c)
-                # 抓取 3 個月資料建立 K 線
-                temp_df = temp_ticker.history(period="3mo")
+                # 抓取 6 個月資料，確保有足夠數據計算六大指標
+                temp_df = temp_ticker.history(period="6mo")
+                
                 if not temp_df.empty:
                     ticker = temp_ticker
                     df = temp_df
+                    # 修正時區問題
+                    df.index = df.index.tz_localize(None)
+                    df = df.reset_index()
+                    # 確保欄位名稱統一
+                    if 'Date' in df.columns:
+                        df['Date'] = df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
                     break
             except: continue
 
         if ticker is None or df.empty:
             return code, None, None, "fail"
 
-        # 資料清洗：統一欄位名稱
-        df = df.reset_index()
-        # 確保日期格式乾淨 (去除時區)
-        df['Date'] = df['Date'].dt.date
-        
         return f"{code}", ticker, df, "yahoo"
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"DB Error: {e}")
         return code, None, None, "fail"
 
 def get_color_settings(code):
@@ -131,10 +127,8 @@ def get_color_settings(code):
 
 # --- 5. 掃描與歷史紀錄 ---
 def add_history(user, text): pass 
-
 def save_scan_results(stype, codes):
     with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
-
 def load_scan_results(stype):
     if os.path.exists(f"scan_{stype}.json"):
         with open(f"scan_{stype}.json", 'r') as f: return json.load(f)
@@ -151,8 +145,4 @@ def save_comment(user, msg):
 def get_comments():
     if os.path.exists(COMMENTS_FILE): return pd.read_csv(COMMENTS_FILE)
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
-
-# --- 7. 其他 ---
-def translate_text(text):
-    # 簡易繁簡轉換或直接回傳 (視需求可擴充)
-    return text
+def translate_text(text): return text
