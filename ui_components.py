@@ -98,7 +98,8 @@ def render_detailed_card(code, name, price, df, source_type="yahoo", key_prefix=
             st.markdown(f"<div class='status-tag' style='background-color:{tag_color}; color:white; width:100%; margin-top:10px;'>{tag_text}</div>", unsafe_allow_html=True)
     return False
 
-def render_chart(df, title, color_settings):
+# V110 修改：新增 key 參數，解決 DuplicateElementId
+def render_chart(df, title, color_settings, key=None):
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
@@ -107,8 +108,9 @@ def render_chart(df, title, color_settings):
     fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1), name='20日線'), row=1, col=1)
     colors = ['#FF2B2B' if c >= o else '#00E050' for c, o in zip(df['Close'], df['Open'])]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=2, col=1)
-    fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10))
-    st.plotly_chart(fig, use_container_width=True)
+    fig.update_layout(height=450, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=10, b=10))
+    # 這裡傳入 key
+    st.plotly_chart(fig, use_container_width=True, key=key)
 
 def render_ai_battle_dashboard(analysis):
     st.markdown("---")
