@@ -11,7 +11,6 @@ import importlib
 from datetime import datetime, time as dt_time, timedelta, timezone
 import difflib 
 
-# --- V90: 安全引入機制 (防爆核心) ---
 try:
     import cv2
     import numpy as np
@@ -22,7 +21,6 @@ except ImportError:
 import stock_db as db
 import stock_ui as ui
 
-# 載入知識庫
 try:
     import knowledge
     importlib.reload(knowledge)
@@ -30,9 +28,8 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V98", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V100", layout="wide")
 
-# --- 通用字串比對函式 ---
 def find_best_match_stock_v90(text):
     garbage = ["試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存", "延遲", "放一", "一些", "一", "二", "三", "R", "G", "B"]
     clean_text = text.upper()
@@ -57,7 +54,6 @@ def find_best_match_stock_v90(text):
         if abs(len(best) - len(clean_text)) <= 2: return name_to_code[best], best
     return None, None
 
-# --- V90: 雙模式影像處理引擎 ---
 def process_image_upload(image_file):
     debug_info = {"raw_text": "", "processed_img": None, "error": None}
     found_stocks = set(); full_ocr_log = ""
@@ -137,7 +133,6 @@ for k, v in defaults.items():
 
 check_session()
 
-# --- V98 關鍵修正：啟動時顯示載入狀態，避免白屏 ---
 status_container = st.empty()
 if not st.session_state['scan_pool']:
     status_container.info("🚀 系統初始化中，正在載入股票代碼，請稍候...")
@@ -209,7 +204,7 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; st.query_params.clear(); nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 99.1 (Yield Fix + Chip)")
+    st.markdown("---"); st.caption("Ver: 100.0 (Metrics+Chip)")
 
 mode = st.session_state['view_mode']
 
@@ -291,13 +286,23 @@ elif mode == 'analysis':
             if src == "fail": st.error("查無資料"); return False
             elif src == "yahoo":
                 df, bid_ask, rt_pack = inject_realtime_data(df, code)
-                
                 symbol_id = stock.ticker if hasattr(stock, 'ticker') else code
                 info = db.get_info_data(symbol_id) 
                 
-                # --- 新增：殖利率計算 ---
-                yield_raw = info.get('dividendYield', 0)
-                yield_val = yield_raw * 100 if yield_raw else None # 修正：若無資料則為 None
+                # --- V100 新增: 五大基本面數據 ---
+                metrics = {
+                    "yield": None,
+                    "pe": info.get('trailingPE'),
+                    "pb": info.get('priceToBook'),
+                    "rev_growth": info.get('revenueGrowth'),
+                    "mkt_cap": info.get('marketCap')
+                }
+
+                # 殖利率智慧修正：如果數值 > 10，假設已是 %，不乘 100；否則乘 100
+                raw_yield = info.get('dividendYield', 0)
+                if raw_yield:
+                    if raw_yield > 5: metrics['yield'] = raw_yield
+                    else: metrics['yield'] = raw_yield * 100
                 
                 shares = info.get('sharesOutstanding', 0)
                 curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]; chg = curr - prev; pct = (chg/prev)*100
@@ -324,8 +329,8 @@ elif mode == 'analysis':
                 summary = db.translate_text(info.get('longBusinessSummary',''))
                 if summary: ui.render_company_profile(summary)
                 
-                # --- 修改：傳入 yield_val ---
-                ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf_str, vt, vy, va, vs, fh, turnover, bid_ask, color_settings, rt_pack, stock_info=info, df=df, chip_data=chip_data, yield_val=yield_val)
+                # 傳入 metrics
+                ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf_str, vt, vy, va, vs, fh, turnover, bid_ask, color_settings, rt_pack, stock_info=info, df=df, chip_data=chip_data, metrics=metrics)
                 ui.render_chart(df, f"{name} K線圖", color_settings)
                 
                 m5 = df['Close'].rolling(5).mean().iloc[-1]; m20 = df['Close'].rolling(20).mean().iloc[-1]; m60 = df['Close'].rolling(60).mean().iloc[-1]
@@ -334,9 +339,8 @@ elif mode == 'analysis':
                 bias = ((curr-m60)/m60)*100
                 ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df, chip_data=chip_data)
                 
-                # --- 關鍵修正：呼叫股權分散表 (確保在所有 UI 之後) ---
+                # --- 強制載入籌碼分佈 (放在最下方) ---
                 if code.isdigit():
-                    # 這裡加入載入提示，確保使用者知道正在運作
                     sh_data = db.get_shareholding_data(code)
                     ui.render_shareholding_distribution(sh_data)
 
