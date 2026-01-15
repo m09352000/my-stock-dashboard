@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 
-# --- CSS 優化: V104 戰情室風格 ---
+# --- CSS 優化: V106 戰情室風格 ---
 def inject_custom_css():
     st.markdown("""
         <style>
@@ -28,6 +28,7 @@ def inject_custom_css():
         /* 籌碼條 */
         .chip-bar-label { display: flex; justify-content: space-between; font-size: 0.9rem; color: #ddd; margin-bottom: 2px;}
         .chip-progress { height: 8px; background-color: #333; border-radius: 4px; overflow: hidden; margin-bottom: 10px; }
+        .chip-fill { height: 100%; border-radius: 4px; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -47,6 +48,36 @@ def render_header(title, show_monitor=False):
 def render_back_button(callback_func):
     if st.button("⬅️ 返回列表", use_container_width=True): callback_func()
 
+# --- V106: 技術指標數列計算 (給圖表用) ---
+def calculate_chart_indicators(df):
+    # MACD (12, 26, 9)
+    exp1 = df['Close'].ewm(span=12, adjust=False).mean()
+    exp2 = df['Close'].ewm(span=26, adjust=False).mean()
+    macd = exp1 - exp2
+    signal = macd.ewm(span=9, adjust=False).mean()
+    hist = macd - signal
+    
+    # KD (9, 3, 3)
+    low_min = df['Low'].rolling(window=9).min()
+    high_max = df['High'].rolling(window=9).max()
+    rsv = (df['Close'] - low_min) / (high_max - low_min) * 100
+    k = rsv.ewm(com=2, adjust=False).mean()
+    d = k.ewm(com=2, adjust=False).mean()
+    
+    # RSI (14)
+    delta = df['Close'].diff()
+    u = delta.copy(); u[u < 0] = 0
+    d_loss = delta.copy(); d_loss[d_loss > 0] = 0
+    rs = u.rolling(window=14).mean() / d_loss.abs().rolling(window=14).mean()
+    rsi = 100 - 100 / (1 + rs)
+    
+    return {
+        "MACD": {"macd": macd, "signal": signal, "hist": hist},
+        "KD": {"k": k, "d": d},
+        "RSI": {"rsi": rsi}
+    }
+
+# --- 技術指標計算核心 (給 AI 報告用 - 保持不變) ---
 def calculate_advanced_indicators(df):
     try:
         close = df['Close']
@@ -239,11 +270,9 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
             render_radar_chart(radar_scores)
     st.markdown("---")
 
-# --- V104: 籌碼分佈渲染 (強制顯示) ---
 def render_chip_structure(chip_dist):
-    # 移除嚴格的 valid 檢查，改為只要傳入就顯示
     if not chip_dist: 
-        st.warning("⚠️ 籌碼資料暫時無法取得")
+        st.warning("⚠️ 籌碼資料暫時無法取得，請稍後再試。")
         return
 
     st.subheader(f"🍰 籌碼結構分析 (外資/法人/散戶)")
@@ -254,7 +283,6 @@ def render_chip_structure(chip_dist):
         ("董監持股", chip_dist.get("directors", 0), "#F45B69")
     ]
     
-    # 計算散戶 (剩餘的)
     known = sum([val for _, val, _ in items])
     retail = max(0, 100 - known)
     items.append(("散戶/其他", retail, "#555555"))
@@ -276,7 +304,7 @@ def render_chip_structure(chip_dist):
         fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=220, showlegend=True)
         st.plotly_chart(fig, use_container_width=True)
         
-    st.info("💡 **數據說明**：整合 FinMind 外資申報與 Yahoo 機構持股，並推算散戶比例。")
+    st.info("💡 **數據說明**：結合 FinMind 外資申報資料與 Yahoo 機構持股，自動補足缺漏數據，確保圖表完整。")
 
 def calculate_supertrend(df, period=10, multiplier=3):
     high = df['High'].values; low = df['Low'].values; close = df['Close'].values
@@ -299,21 +327,111 @@ def calculate_supertrend(df, period=10, multiplier=3):
         supertrend[i] = final_lower[i] if trend[i] == 1 else final_upper[i]
     return supertrend, trend
 
+# --- V106: 強化版 K線圖與多選指標 ---
 def render_chart(df, title, color_settings):
+    # 1. 計算所有基礎數值
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
     df['MA60'] = df['Close'].rolling(60).mean()
     st_line, st_dir = calculate_supertrend(df)
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.05)
-    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K線', increasing_line_color=color_settings['up'], decreasing_line_color=color_settings['down']), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1), name='月線'), row=1, col=1)
+    
+    # 2. 計算所有技術指標數列 (For Charting)
+    ind_data = calculate_chart_indicators(df)
+    
+    # 3. UI 選擇器
+    st.write("### 📉 進階技術線圖")
+    options = ["成交量", "MACD", "RSI", "KD"]
+    defaults = ["成交量"] # 預設只顯示成交量，保持乾淨
+    
+    selected_inds = st.multiselect(
+        "🛠️ 選擇副圖指標 (可多選，由上而下排列)",
+        options=options,
+        default=defaults,
+        key="chart_ind_selector"
+    )
+    
+    # 4. 動態計算圖表列數與高度
+    num_sub = len(selected_inds)
+    num_rows = 1 + num_sub
+    
+    # 高度計算：主圖 500px，每個副圖 +150px
+    total_height = 500 + (num_sub * 150)
+    
+    # Row Heights 分配 (Plotly 需要比例)
+    # 假設 Main=0.5, Others split the rest? Plotly row_heights is relative.
+    # 簡單做法：固定主圖比例較大。
+    # 讓主圖佔 50%，剩下 50% 由副圖均分 (若有)。
+    if num_sub == 0:
+        row_heights = [1.0]
+    else:
+        main_ratio = 0.5 # 主圖佔一半
+        sub_ratio = 0.5 / num_sub
+        row_heights = [main_ratio] + [sub_ratio] * num_sub
+
+    # 5. 建立 Subplots
+    fig = make_subplots(
+        rows=num_rows, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=row_heights,
+        subplot_titles=[title] + selected_inds
+    )
+    
+    # --- Row 1: 主圖 (K線 + MA + Supertrend) ---
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+        name='K線', increasing_line_color=color_settings['up'], decreasing_line_color=color_settings['down']
+    ), row=1, col=1)
+    
+    fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], line=dict(color='#AAD3FF', width=1), name='5日線'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], line=dict(color='#FFA500', width=1.5), name='月線'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MA60'], line=dict(color='#888888', width=1), name='季線'), row=1, col=1)
+    
+    # Supertrend 著色
     st_green = st_line.copy(); st_green[st_dir != 1] = np.nan
     st_red = st_line.copy(); st_red[st_dir != -1] = np.nan
     fig.add_trace(go.Scatter(x=df.index, y=st_green, line=dict(color='#00E050', width=2), name='支撐'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=st_red, line=dict(color='#FF2B2B', width=2), name='壓力'), row=1, col=1)
-    vol_colors = [color_settings['up'] if c >= o else color_settings['down'] for c, o in zip(df['Close'], df['Open'])]
-    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=vol_colors, name='成交量'), row=2, col=1)
-    fig.update_layout(height=500, xaxis_rangeslider_visible=False, title=title, margin=dict(l=10, r=10, t=30, b=10), showlegend=False)
+    
+    # --- Subplots: 依序加入指標 ---
+    for i, ind in enumerate(selected_inds):
+        r = i + 2 # Row index starts from 2
+        
+        if ind == "成交量":
+            colors = [color_settings['up'] if c >= o else color_settings['down'] for c, o in zip(df['Close'], df['Open'])]
+            fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='成交量'), row=r, col=1)
+        
+        elif ind == "MACD":
+            m = ind_data["MACD"]
+            hist_colors = ['#FF2B2B' if v >= 0 else '#00E050' for v in m['hist']]
+            fig.add_trace(go.Bar(x=df.index, y=m['hist'], marker_color=hist_colors, name='MACD柱'), row=r, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=m['macd'], line=dict(color='#FFD700', width=1), name='DIF'), row=r, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=m['signal'], line=dict(color='#00FFFF', width=1), name='DEA'), row=r, col=1)
+            
+        elif ind == "KD":
+            k_val = ind_data["KD"]["k"]
+            d_val = ind_data["KD"]["d"]
+            fig.add_trace(go.Scatter(x=df.index, y=k_val, line=dict(color='#FFA500', width=1), name='K值'), row=r, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=d_val, line=dict(color='#00FFFF', width=1), name='D值'), row=r, col=1)
+            
+        elif ind == "RSI":
+            r_val = ind_data["RSI"]["rsi"]
+            fig.add_trace(go.Scatter(x=df.index, y=r_val, line=dict(color='#D8BFD8', width=1), name='RSI'), row=r, col=1)
+            # 輔助線
+            fig.add_hline(y=70, line_dash="dot", line_color="red", row=r, col=1)
+            fig.add_hline(y=30, line_dash="dot", line_color="green", row=r, col=1)
+
+    # 6. 美化設定
+    fig.update_layout(
+        height=total_height,
+        margin=dict(l=10, r=10, t=30, b=10),
+        showlegend=True,
+        xaxis_rangeslider_visible=False,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 def render_company_profile(summary): 
