@@ -28,7 +28,7 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V101", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V102", layout="wide")
 
 def find_best_match_stock_v90(text):
     garbage = ["試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存", "延遲", "放一", "一些", "一", "二", "三", "R", "G", "B"]
@@ -204,7 +204,7 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; st.query_params.clear(); nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 101.0 (Real Yield + Inst. Holdings)")
+    st.markdown("---"); st.caption("Ver: 102.0 (Real Yield Fix)")
 
 mode = st.session_state['view_mode']
 
@@ -289,7 +289,7 @@ elif mode == 'analysis':
                 symbol_id = stock.ticker if hasattr(stock, 'ticker') else code
                 info = db.get_info_data(symbol_id) 
                 
-                # --- V101: 改用 db.get_real_yield 取得正確殖利率 ---
+                # --- V102: 改用 db.get_real_yield 取得正確殖利率 ---
                 curr = df['Close'].iloc[-1]
                 real_yield = db.get_real_yield(symbol_id, curr)
                 
@@ -335,7 +335,7 @@ elif mode == 'analysis':
                 bias = ((curr-m60)/m60)*100
                 ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df, chip_data=chip_data)
                 
-                # --- V101: 呼叫四大法人持股渲染 ---
+                # --- V102: 呼叫四大法人持股渲染 ---
                 if code.isdigit():
                     inst_data = db.get_institutional_shares(code, info)
                     ui.render_shareholding_distribution(inst_data)
