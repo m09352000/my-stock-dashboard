@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 
-# --- CSS 優化: V96 戰情室風格 ---
+# --- CSS 優化: V101 戰情室風格 ---
 def inject_custom_css():
     st.markdown("""
         <style>
@@ -41,10 +41,10 @@ def inject_custom_css():
         .tactic-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 1rem; }
         .tactic-val { color: #eee; font-weight: bold; font-family: monospace; }
         
-        /* 基本面數據小卡 */
-        .fund-card { border: 1px solid #444; border-radius: 5px; padding: 10px; text-align: center; background-color: #25262B; }
-        .fund-label { font-size: 0.85rem; color: #aaa; margin-bottom: 5px; }
-        .fund-value { font-size: 1.1rem; font-weight: bold; color: #fff; }
+        /* 籌碼分佈條風格 */
+        .chip-bar-label { display: flex; justify-content: space-between; font-size: 0.9rem; color: #ddd; margin-bottom: 2px;}
+        .chip-progress { height: 8px; background-color: #333; border-radius: 4px; overflow: hidden; margin-bottom: 10px; }
+        .chip-fill { height: 100%; border-radius: 4px; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -212,12 +212,12 @@ def generate_detailed_advice(price, m5, m20, m60, rsi, tech_ind, chip_data=None)
     advice["signals"] = signals
     return advice
 
-# --- V100: 全方位基本面儀表板 ---
+# --- V101: 全方位基本面儀表板 ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              turnover_rate, bid_ask_data, color_settings, 
                              realtime_data=None, stock_info=None, df=None, chip_data=None, 
-                             metrics=None): # metrics 包含: yield, pe, pb, growth, market_cap
+                             metrics=None):
     
     if realtime_data:
         curr = realtime_data['latest_trade_price']
@@ -226,13 +226,12 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     radar_scores = calculate_six_indicators(df, stock_info, chip_data)
     color = "#FF2B2B" if chg > 0 else ("#00E050" if chg < 0 else "white")
     
-    # 解析新指標，若無資料顯示 -
+    # 格式化
     y_str = f"{metrics['yield']:.2f}%" if metrics and metrics.get('yield') is not None else "-"
     pe_str = f"{metrics['pe']:.2f}" if metrics and metrics.get('pe') else "-"
     pb_str = f"{metrics['pb']:.2f}" if metrics and metrics.get('pb') else "-"
     rev_str = f"{metrics['rev_growth']*100:.2f}%" if metrics and metrics.get('rev_growth') else "-"
     
-    # 市值格式化 (億/兆)
     cap_val = metrics.get('mkt_cap', 0) if metrics else 0
     if cap_val > 1000000000000: cap_str = f"{cap_val/1000000000000:.2f}兆"
     elif cap_val > 100000000: cap_str = f"{cap_val/100000000:.2f}億"
@@ -241,17 +240,14 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     with st.container():
         c_main, c_radar = st.columns([1.8, 1])
         with c_main:
-            # 價格區
             st.markdown(f"<span class='big-price' style='color:{color}'>{curr:.2f}</span> <span style='font-size:1.2rem; color:{color}'>{chg:+.2f} ({pct:+.2f}%)</span>", unsafe_allow_html=True)
             
-            # 第一排：交易數據
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("最高", f"{high:.2f}")
             m2.metric("最低", f"{low:.2f}")
             m3.metric("成交量", f"{int(vol/1000)}K")
             m4.metric("總市值", cap_str)
             
-            # 第二排：基本面數據 (新需求)
             b1, b2, b3, b4 = st.columns(4)
             b1.metric("本益比 P/E", pe_str)
             b2.metric("淨值比 P/B", pb_str)
@@ -331,22 +327,40 @@ def render_detailed_card(*args, **kwargs): return False
 def render_term_card(t, c): st.info(f"{t}: {c}")
 def render_kline_pattern_card(t, d): st.write(t)
 
-# --- V99: 籌碼分佈渲染 (確保強制顯示) ---
+# --- V101: 籌碼分佈渲染 (四大法人%) ---
 def render_shareholding_distribution(sh_data):
-    if not sh_data:
-        st.warning("⚠️ 查無近期股權分散資料，可能是資料源更新延遲或該個股無此數據。")
-        return
+    if not sh_data: return
 
-    st.subheader(f"🍰 籌碼分佈 (股權分散) - {sh_data['date']}")
-    df = sh_data['data']
+    st.subheader(f"🍰 籌碼結構分佈 (單位:%)")
+    
+    # 建立數據
+    items = [
+        ("外資持股", sh_data.get("Foreign", 0), "#FF9F1C"),
+        ("投信持股 (估)", sh_data.get("Trust", 0), "#2B908F"),
+        ("自營商持股 (估)", sh_data.get("Dealer", 0), "#90EE90"),
+        ("董監持股", sh_data.get("Directors", 0), "#F45B69")
+    ]
+    
     c1, c2 = st.columns([1, 1])
+    
     with c1:
-        st.caption("詳細分級表")
-        st.dataframe(df.style.format({"股東人數": "{:,}", "持股數量": "{:,}", "持股比例(%)": "{:.2f}"}).background_gradient(subset=['持股比例(%)'], cmap="Reds"), use_container_width=True, height=400, hide_index=True)
+        for label, val, color in items:
+            st.markdown(f"""
+            <div class='chip-bar-label'><span>{label}</span><span>{val:.2f}%</span></div>
+            <div class='chip-progress'><div class='chip-fill' style='width:{min(val, 100)}%; background-color:{color};'></div></div>
+            """, unsafe_allow_html=True)
+
     with c2:
-        st.caption("持股比例排行 (前8大級距)")
-        top_5 = df.sort_values(by='持股比例(%)', ascending=False).head(8)
-        fig = go.Figure(go.Bar(x=top_5['持股比例(%)'], y=top_5['持股分級'], orientation='h', text=top_5['持股比例(%)'].apply(lambda x: f"{x:.2f}%"), textposition='auto', marker_color='#FF9F1C'))
-        fig.update_layout(xaxis_title="比例 (%)", yaxis=dict(autorange="reversed"), height=400, margin=dict(l=0, r=0, t=30, b=0))
+        # 繪製圓餅圖
+        labels = [i[0] for i in items]; values = [i[1] for i in items]
+        # 計算"其他/散戶"
+        total_known = sum(values)
+        if total_known < 100:
+            labels.append("散戶/其他")
+            values.append(100 - total_known)
+            
+        fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=['#FF9F1C', '#2B908F', '#90EE90', '#F45B69', '#555555']))])
+        fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=200, showlegend=True)
         st.plotly_chart(fig, use_container_width=True)
-    st.info("💡 **籌碼判讀**：高持股級距比例上升 = 籌碼集中 (大戶買)；低持股級距比例上升 = 籌碼渙散 (散戶接)。")
+        
+    st.info("💡 **數據說明**：外資與董監持股為精確值；投信與自營商為機構持股之推估值，僅供參考。")
