@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 import streamlit as st
 
-# --- V102: 資料庫核心 (Yield Fix + Accurate Chips) ---
+# --- V103: 資料庫核心 (Fix Yield & Chip Logic) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -117,7 +117,6 @@ def get_stock_data(code):
     except Exception as e:
         return code, None, None, "fail"
 
-# --- V96.1 Rate Limit 防護盾 ---
 @st.cache_data(ttl=86400)
 def get_info_data(symbol):
     try:
@@ -125,89 +124,135 @@ def get_info_data(symbol):
     except Exception as e:
         return {}
 
-# --- V102 修正：精確現金殖利率 (不使用 TTM) ---
+# --- V103 新增：精確股利數據抓取 ---
 @st.cache_data(ttl=3600)
-def get_real_yield(symbol, current_price):
+def get_dividend_data(symbol, current_price):
+    """
+    抓取最新的現金股利金額，並計算即時殖利率。
+    優先順序：dividendRate (年度宣告) > last_dividend (最近一次)
+    """
+    data = {"cash_div": 0.0, "yield": 0.0}
     try:
-        if current_price <= 0: return 0.0
+        if current_price <= 0: return data
         
         ticker = yf.Ticker(symbol)
         info = ticker.info
         
-        # 1. 優先使用 dividendRate (年度股利金額)
-        # 這是資料庫中紀錄的「最近一次年度配息金額」，用這個除以股價最符合「公開公布比例」
+        # 1. 嘗試直接取得年度股利 (dividendRate)
+        # 這通常對應到「今年宣布」或「去年整年」的總和
         div_rate = info.get('dividendRate')
-        if div_rate is not None and div_rate > 0:
-            return (div_rate / current_price) * 100
-            
-        # 2. 如果沒有 rate，使用 dividendYield (資料庫直接計算好的殖利率)
-        # 注意：YF 的 yield 通常是小數 (例如 0.05 代表 5%)
-        div_yield = info.get('dividendYield')
-        if div_yield is not None and div_yield > 0:
-            return div_yield * 100
-
-        # 3. 最後手段：抓取最近一次的配息紀錄 (Last Dividend)
-        dividends = ticker.dividends
-        if not dividends.empty:
-            # 取最後一筆 (最新) 的現金股利
-            last_div = dividends.iloc[-1]
-            if last_div > 0:
-                # 假設是年配息 (台股大部分是年配，若是季配如台積電，這裡會顯示單季殖利率)
-                # 為了符合"公開公布比例"定義，通常是指"最新一筆現金股利/股價"
-                return (last_div / current_price) * 100
         
-        return 0.0
-    except:
-        return 0.0
+        # 2. 如果沒有，嘗試抓取 actions (配息紀錄)
+        if not div_rate:
+            dividends = ticker.dividends
+            if not dividends.empty:
+                # 抓取最近 365 天的配息總和 (TTM)
+                one_year_ago = pd.Timestamp.now().tz_localize(dividends.index.tz) - pd.DateOffset(days=365)
+                recent_divs = dividends[dividends.index >= one_year_ago]
+                if not recent_divs.empty:
+                    div_rate = recent_divs.sum()
+                else:
+                    # 若一年內無配息，取最近一次的紀錄 (Last)
+                    div_rate = dividends.iloc[-1]
 
-# --- V102 修正：籌碼分佈 (真實數據版) ---
+        if div_rate and div_rate > 0:
+            data["cash_div"] = float(div_rate)
+            data["yield"] = (div_rate / current_price) * 100
+            
+        return data
+    except:
+        return data
+
+# --- V103 新增：複合式籌碼分佈 (FinMind 強力版) ---
 @st.cache_data(ttl=86400)
-def get_institutional_shares(stock_id, info_data):
-    # 初始化
+def get_chip_distribution_v2(stock_id):
+    """
+    結合 [外資總持股] 與 [集保分級] 來推算籌碼結構。
+    解決免費 API 抓不到投信/自營總持股的問題。
+    """
     data = {
-        "Foreign": 0.0,         # 外資 (精確)
-        "Directors": 0.0,       # 董監 (精確)
-        "Domestic_Inst": 0.0,   # 國內機構 (含投信/自營) (推算: 總機構 - 外資)
+        "foreign": 0.0,      # 外資 (FinMind)
+        "big_hands": 0.0,    # 大戶 (>400張) (FinMind)
+        "retail": 0.0,       # 散戶 (<50張) (推算)
+        "other_big": 0.0,    # 本土主力/法人 (大戶 - 外資)
+        "valid": False
     }
     
+    if not stock_id.isdigit(): return data
+
     try:
-        # 1. 外資持股比例 (FinMind 數據最準)
-        if stock_id.isdigit():
-            from FinMind.data import DataLoader
-            dl = DataLoader()
-            # 抓取外資總持股表
-            df_foreign = dl.taiwan_stock_total_foreign_and_chinese_investment_shares(
-                stock_id=stock_id, 
-                start_date=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-            )
-            if not df_foreign.empty:
-                # ForeignInvestmentSharesRatio = 外資持股比例
-                data["Foreign"] = df_foreign.iloc[-1]['ForeignInvestmentSharesRatio']
+        from FinMind.data import DataLoader
+        dl = DataLoader()
+        start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
         
-        # 2. 董監持股 (Insiders) - 使用 YF info
-        # YF 的 heldPercentInsiders 指內部人持有比例
-        insider_hold = info_data.get('heldPercentInsiders', 0)
-        if insider_hold:
-            data["Directors"] = insider_hold * 100
+        # 1. 抓取外資總持股比例
+        df_foreign = dl.taiwan_stock_total_foreign_and_chinese_investment_shares(
+            stock_id=stock_id, start_date=start_date
+        )
+        if not df_foreign.empty:
+            data["foreign"] = df_foreign.iloc[-1]['ForeignInvestmentSharesRatio']
+
+        # 2. 抓取集保分佈 (判斷大戶與散戶)
+        df_share = dl.taiwan_stock_shareholding(
+            stock_id=stock_id, start_date=start_date
+        )
+        
+        if not df_share.empty:
+            latest_date = df_share['date'].max()
+            df_latest = df_share[df_share['date'] == latest_date]
             
-        # 3. 國內機構 (投信+自營)
-        # 因為免費 API 無法直接取得「投信總持股%」與「自營商總持股%」
-        # 為了不顯示錯誤的猜測數據，我們改為顯示「國內機構法人」
-        # 邏輯：YF 的 heldPercentInstitutions (總機構持股) - 外資持股
-        inst_hold = info_data.get('heldPercentInstitutions', 0) * 100
-        
-        domestic_inst = max(0, inst_hold - data["Foreign"])
-        
-        if domestic_inst > 0:
-            data["Domestic_Inst"] = domestic_inst
+            # 定義：大戶 = 持股 > 400 張 (等級 15, 16, 17)
+            # FinMind 的 HoldingRange 字串處理需小心
+            # 這裡簡化邏輯：抓取 percent 加總
+            
+            big_percent = 0.0
+            retail_percent = 0.0
+            
+            for _, row in df_latest.iterrows():
+                level = row['HoldingRange'] # e.g., "1-999" or "1,000,001-..."
+                pct = row['percent']
+                
+                # 解析級距 (這裡做簡單判斷)
+                # FinMind 級距通常固定，等級 15 是 400,001-600,000
+                # 若無法精確解析，我們依賴 "more than 400,000" 的關鍵字或列表索引
+                # 簡單法：假設 FinMind 資料順序是固定的，後段是大戶
+                
+                # 更精確的做法：解析字串
+                try:
+                    # 處理 "1,000,001-" 或 "400,001-600,000"
+                    lower_bound = 0
+                    clean_range = str(level).replace(',', '')
+                    if '-' in clean_range:
+                        lower_bound = int(clean_range.split('-')[0])
+                    elif 'more than' in clean_range or '以上' in clean_range: # 處理 "1,000,001以上"
+                         # 提取數字
+                         import re
+                         nums = re.findall(r'\d+', clean_range)
+                         if nums: lower_bound = int(nums[0])
+
+                    if lower_bound >= 400000: # 大於 400 張
+                        big_percent += pct
+                    elif lower_bound < 50000: # 小於 50 張 (散戶)
+                        retail_percent += pct
+                        
+                except: continue
+            
+            data["big_hands"] = big_percent
+            data["retail"] = retail_percent
+            
+            # 計算 "本土主力/法人" = 大戶總數 - 外資 (若外資也是大戶)
+            # 這是一個估計值，讓圖表不要只有 "外資" 跟 "散戶"
+            # 若 Big < Foreign (理論上不應發生，除非外資很多是中小戶)，則歸零
+            data["other_big"] = max(0, data["big_hands"] - data["foreign"])
+            data["valid"] = True
             
         return data
 
     except Exception as e:
-        print(f"Chip Data Error: {e}")
+        print(f"Chip V2 Error: {e}")
         return data
 
-# --- V98: 舊版籌碼 (主力買賣超) 仍保留用於計算指標 ---
+# --- V98: 舊版籌碼 (主力買賣超) 仍保留用於計算指標分數 ---
 @st.cache_data(ttl=3600)
 def get_chip_data(stock_id):
     try:
@@ -233,7 +278,6 @@ def get_chip_data(stock_id):
 def get_color_settings(code):
     return {'up': 'red', 'down': 'green', 'delta': 'inverse'}
 
-# --- 5. 掃描與歷史紀錄 ---
 def add_history(user, text): pass 
 def save_scan_results(stype, codes):
     with open(f"scan_{stype}.json", 'w') as f: json.dump(codes, f)
@@ -242,7 +286,6 @@ def load_scan_results(stype):
         with open(f"scan_{stype}.json", 'r') as f: return json.load(f)
     return []
 
-# --- 6. 留言板 ---
 def save_comment(user, msg):
     if not os.path.exists(COMMENTS_FILE): df = pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
     else: df = pd.read_csv(COMMENTS_FILE)
@@ -254,7 +297,6 @@ def get_comments():
     if os.path.exists(COMMENTS_FILE): return pd.read_csv(COMMENTS_FILE)
     return pd.DataFrame(columns=['User', 'Nickname', 'Message', 'Time'])
 
-# --- 7. 翻譯功能 (長文完整翻譯) ---
 def translate_text(text):
     if not text or text == "暫無詳細描述": return "" 
     try:
