@@ -28,7 +28,7 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V102", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V103", layout="wide")
 
 def find_best_match_stock_v90(text):
     garbage = ["試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存", "延遲", "放一", "一些", "一", "二", "三", "R", "G", "B"]
@@ -204,7 +204,7 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; st.query_params.clear(); nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 102.0 (Real Yield Fix)")
+    st.markdown("---"); st.caption("Ver: 103.0 (Fixed Dividends & Chips)")
 
 mode = st.session_state['view_mode']
 
@@ -289,12 +289,13 @@ elif mode == 'analysis':
                 symbol_id = stock.ticker if hasattr(stock, 'ticker') else code
                 info = db.get_info_data(symbol_id) 
                 
-                # --- V102: 改用 db.get_real_yield 取得正確殖利率 ---
+                # --- V103: 完整指標包 ---
                 curr = df['Close'].iloc[-1]
-                real_yield = db.get_real_yield(symbol_id, curr)
+                div_data = db.get_dividend_data(symbol_id, curr)
                 
                 metrics = {
-                    "yield": real_yield, # 這是正確的 %
+                    "cash_div": div_data['cash_div'], # 現金股利金額
+                    "yield": div_data['yield'],       # 動態殖利率
                     "pe": info.get('trailingPE'),
                     "pb": info.get('priceToBook'),
                     "rev_growth": info.get('revenueGrowth'),
@@ -335,10 +336,10 @@ elif mode == 'analysis':
                 bias = ((curr-m60)/m60)*100
                 ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df, chip_data=chip_data)
                 
-                # --- V102: 呼叫四大法人持股渲染 ---
+                # --- V103: 籌碼結構 ---
                 if code.isdigit():
-                    inst_data = db.get_institutional_shares(code, info)
-                    ui.render_shareholding_distribution(inst_data)
+                    chip_dist = db.get_chip_distribution_v2(code)
+                    ui.render_chip_structure(chip_dist)
 
             ui.render_back_button(go_back)
             return is_live
