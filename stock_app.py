@@ -28,7 +28,7 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V103", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V104", layout="wide")
 
 def find_best_match_stock_v90(text):
     garbage = ["試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存", "延遲", "放一", "一些", "一", "二", "三", "R", "G", "B"]
@@ -204,7 +204,7 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; st.query_params.clear(); nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 103.0 (Fixed Dividends & Chips)")
+    st.markdown("---"); st.caption("Ver: 104.0 (Fix Force Data)")
 
 mode = st.session_state['view_mode']
 
@@ -289,17 +289,17 @@ elif mode == 'analysis':
                 symbol_id = stock.ticker if hasattr(stock, 'ticker') else code
                 info = db.get_info_data(symbol_id) 
                 
-                # --- V103: 完整指標包 ---
+                # --- V104: 確保每個指標都傳入 ---
                 curr = df['Close'].iloc[-1]
                 div_data = db.get_dividend_data(symbol_id, curr)
                 
                 metrics = {
-                    "cash_div": div_data['cash_div'], # 現金股利金額
-                    "yield": div_data['yield'],       # 動態殖利率
+                    "cash_div": div_data['cash_div'], 
+                    "yield": div_data['yield'],
                     "pe": info.get('trailingPE'),
                     "pb": info.get('priceToBook'),
                     "rev_growth": info.get('revenueGrowth'),
-                    "mkt_cap": info.get('marketCap') or 0 # Safety fix for NoneType
+                    "mkt_cap": info.get('marketCap') or 0
                 }
                 
                 shares = info.get('sharesOutstanding', 0)
@@ -311,16 +311,19 @@ elif mode == 'analysis':
                 fh = info.get('heldPercentInstitutions', 0)*100
                 color_settings = db.get_color_settings(code)
                 
+                # V104: 確保 Chip Data 存在，即使是空值
                 chip_data = db.get_chip_data(code)
+                if not chip_data: chip_data = {"foreign": 0, "trust": 0, "dealer": 0, "date": ""}
+                
+                # 主力動向判讀
                 mf_str = "籌碼計算中..."
                 if chip_data:
-                    f = chip_data['foreign']; t = chip_data['trust']
+                    f = chip_data.get('foreign', 0); t = chip_data.get('trust', 0)
                     if f > 500 and t > 0: mf_str = "🔴 土洋合流"
                     elif f > 0: mf_str = "🔴 外資買進"
                     elif f < -1000: mf_str = "🟢 外資提款"
                     elif t > 0: mf_str = "🔴 投信佈局"
                     else: mf_str = "⚪ 觀望"
-                else: mf_str = "主力進貨 🔴" if (chg>0 and vt>vy) else ("主力出貨 🟢" if (chg<0 and vt>vy) else "觀望")
                 
                 vol_r = vt/va; vs = "爆量 🔥" if vol_r>1.5 else ("量縮 💤" if vol_r<0.6 else "正常")
                 
@@ -336,9 +339,9 @@ elif mode == 'analysis':
                 bias = ((curr-m60)/m60)*100
                 ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df, chip_data=chip_data)
                 
-                # --- V103: 籌碼結構 ---
+                # V104: 籌碼分佈 (強制渲染)
                 if code.isdigit():
-                    chip_dist = db.get_chip_distribution_v2(code)
+                    chip_dist = db.get_chip_distribution_v2(code, info)
                     ui.render_chip_structure(chip_dist)
 
             ui.render_back_button(go_back)
