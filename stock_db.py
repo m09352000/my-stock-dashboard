@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 import streamlit as st
 
-# --- V106: 資料庫核心 (暴力配息搜尋 + 混合籌碼) ---
+# --- V108: 資料庫核心 (暴力配息搜尋 + 混合籌碼) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
