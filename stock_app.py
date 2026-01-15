@@ -28,7 +28,7 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V107", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V108", layout="wide")
 
 def find_best_match_stock_v90(text):
     garbage = ["試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存", "延遲", "放一", "一些", "一", "二", "三", "R", "G", "B"]
@@ -109,9 +109,14 @@ def inject_realtime_data(df, code):
             high = float(rt['high']); low = float(rt['low']); open_p = float(rt['open'])
             vol = float(rt['accumulate_trade_volume'])
             rt_pack = {'latest_trade_price': latest, 'high': high, 'low': low, 'open': open_p, 'accumulate_trade_volume': vol, 'previous_close': float(df['Close'].iloc[-2]) if len(df)>1 else open_p}
+            
+            # V108 修正：API 回傳的 vol 已經是股數，不需要再乘 1000
             last_idx = df.index[-1]
-            df.at[last_idx, 'Close'] = latest; df.at[last_idx, 'High'] = max(high, df.at[last_idx, 'High'])
-            df.at[last_idx, 'Low'] = min(low, df.at[last_idx, 'Low']); df.at[last_idx, 'Volume'] = int(vol) * 1000
+            df.at[last_idx, 'Close'] = latest
+            df.at[last_idx, 'High'] = max(high, df.at[last_idx, 'High'])
+            df.at[last_idx, 'Low'] = min(low, df.at[last_idx, 'Low'])
+            df.at[last_idx, 'Volume'] = int(vol) # 這裡原本有 * 1000，已移除
+            
             bid_ask = {'bid_price': rt.get('best_bid_price', []), 'bid_volume': rt.get('best_bid_volume', []), 'ask_price': rt.get('best_ask_price', []), 'ask_volume': rt.get('best_ask_volume', [])}
             return df, bid_ask, rt_pack
     except: return df, None, None
@@ -204,18 +209,18 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; st.query_params.clear(); nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 107.0 (K-Line Images Added)")
+    st.markdown("---"); st.caption("Ver: 108.0 (Unit Fix: 張)")
 
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V107")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V108")
     st.markdown("""
-    ### 🚀 V107 旗艦版更新 (教學圖解版)：
-    * 🕯️ **K線圖解實裝**：股市新手村的教學區現在會顯示動態繪製的 K 線型態圖，不再只有純文字。
+    ### 🚀 V108 修正更新：
+    * 🛠️ **單位修正**：成交量單位從令人困惑的「K」修正為台灣標準單位「張」，且加入千分位逗號 (例如: 112,493 張)。
+    * 🕯️ **K線數據校正**：修復了即時成交量計算錯誤的問題，確保圖表顯示正確的量能。
     * 💰 **殖利率校正**：採用暴力回溯算法，精準鎖定最新年度現金股利，並提供即時動態殖利率。
     * 🍰 **真實籌碼透視**：混合 FinMind 與 Yahoo 數據，完整呈現「外資 / 國內法人 / 董監 / 散戶」結構。
-    * 📉 **專業多工線圖**：K線圖新增 MACD、RSI、KD 指標切換，視覺化大升級。
     """)
 
 elif mode == 'login':
