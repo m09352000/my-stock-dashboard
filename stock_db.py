@@ -151,6 +151,32 @@ def get_chip_data(stock_id):
         return chip_data
     except: return None
 
+# --- V99 新增：獲取股權分散表 (籌碼分佈) ---
+@st.cache_data(ttl=86400)
+def get_shareholding_data(stock_id):
+    try:
+        if not stock_id.isdigit(): return None
+        
+        # 延遲載入
+        from FinMind.data import DataLoader
+        dl = DataLoader()
+        
+        # 往回抓 30 天以確保涵蓋到最新的週資料
+        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        
+        df = dl.taiwan_stock_shareholding(stock_id=stock_id, start_date=start_date)
+        
+        if not df.empty:
+            latest_date = df['date'].max()
+            df_latest = df[df['date'] == latest_date].copy()
+            df_latest = df_latest[['HoldingRange', 'people', 'unit', 'percent']]
+            df_latest.columns = ['持股分級', '股東人數', '持股數量', '持股比例(%)']
+            return {"date": latest_date, "data": df_latest}
+            
+        return None
+    except Exception as e:
+        return None
+
 def get_color_settings(code):
     return {'up': 'red', 'down': 'green', 'delta': 'inverse'}
 
