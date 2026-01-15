@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 import streamlit as st
 
-# --- V108: 資料庫核心 (暴力配息搜尋 + 混合籌碼) ---
+# --- V109: 資料庫核心 (Deep Scan + Hybrid Chips) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -117,119 +117,84 @@ def get_stock_data(code):
     except Exception as e:
         return code, None, None, "fail"
 
-# --- V105 修正：確保 Info 絕對回傳 (避免 NoneType 錯誤) ---
 @st.cache_data(ttl=86400)
 def get_info_data(symbol):
     try:
         t = yf.Ticker(symbol)
-        info = t.info
-        return info if info else {}
-    except Exception as e:
-        return {}
+        return t.info if t.info else {}
+    except: return {}
 
-# --- V106 核心：暴力股利搜尋 (確保抓到 9.0) ---
+# --- V106: 暴力股利搜尋 (確保抓到 9.0) ---
 @st.cache_data(ttl=3600)
 def get_dividend_data(symbol, current_price):
-    """
-    深入搜尋歷史配息，解決 info 欄位缺失問題。
-    """
     data = {"cash_div": 0.0, "yield": 0.0}
     try:
         if current_price <= 0: return data
-        
         ticker = yf.Ticker(symbol)
         
-        # 策略 1: 直接讀取 info (最快)
+        # 策略 1: 直接讀取 info
         div_rate = ticker.info.get('dividendRate')
         
-        # 策略 2: 若 info 沒資料，暴力掃描 dividends 歷史
+        # 策略 2: 暴力掃描 dividends 歷史
         if not div_rate or div_rate == 0:
             hist = ticker.dividends
             if not hist.empty:
-                # 抓取過去 365 天內的配息總和 (年配/季配皆適用)
-                # 使用 tz_localize(None) 移除時區以避免錯誤
                 now = pd.Timestamp.now().tz_localize(None)
-                try:
-                    hist.index = hist.index.tz_localize(None)
-                except: pass # 已經沒時區就略過
+                try: hist.index = hist.index.tz_localize(None)
+                except: pass
                 
                 one_year_ago = now - pd.DateOffset(days=365)
                 recent = hist[hist.index >= one_year_ago]
                 
-                if not recent.empty:
-                    div_rate = recent.sum()
-                else:
-                    # 如果剛好超過一年 (例如 13 個月前發的)，抓「最近一筆」
-                    div_rate = hist.iloc[-1]
+                if not recent.empty: div_rate = recent.sum()
+                else: div_rate = hist.iloc[-1] # 抓最後一筆
 
         if div_rate and div_rate > 0:
             data["cash_div"] = float(div_rate)
             data["yield"] = (div_rate / current_price) * 100
             
         return data
-    except Exception as e:
-        print(f"Div Error: {e}")
-        return data
+    except: return data
 
-# --- V106 核心：混合式籌碼分佈 (外資+法人+董監) ---
+# --- V106: 混合式籌碼分佈 (外資+法人+董監) ---
 @st.cache_data(ttl=86400)
 def get_chip_distribution_v2(stock_id, info_data):
-    """
-    結合 FinMind (外資) 與 YF (機構/董監) 數據。
-    若 FinMind 失敗，自動切換至 YF 估算模式，確保圖表不空白。
-    """
-    data = {
-        "foreign": 0.0,
-        "directors": 0.0,
-        "domestic_inst": 0.0, # 投信/自營/其他
-        "valid": False
-    }
+    data = { "foreign": 0.0, "directors": 0.0, "domestic_inst": 0.0, "valid": False }
     
-    # 1. 董監持股 (YF 數據通常準確)
+    # 1. 董監 (YF)
     try:
         insider = info_data.get('heldPercentInsiders', 0)
         if insider: data['directors'] = insider * 100
     except: pass
 
-    # 2. 外資 (優先用 FinMind 抓精確值)
+    # 2. 外資 (FinMind)
     try:
         if stock_id.isdigit():
             from FinMind.data import DataLoader
             dl = DataLoader()
-            # 抓取最近 60 天資料，避免假日無數據
             start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
             df_f = dl.taiwan_stock_total_foreign_and_chinese_investment_shares(stock_id=stock_id, start_date=start_date)
-            
             if not df_f.empty:
                 data['foreign'] = df_f.iloc[-1]['ForeignInvestmentSharesRatio']
                 data['valid'] = True
     except: pass
 
-    # 3. 國內法人 & 補救機制
-    # 邏輯：YF 的 heldPercentInstitutions = 外資 + 國內法人
+    # 3. 國內法人 (YF 機構 - FinMind 外資)
     try:
         total_inst = info_data.get('heldPercentInstitutions', 0) * 100
-        
-        # 情況 A: FinMind 成功抓到外資
         if data['foreign'] > 0:
-            # 國內法人 = 總機構 - 外資 (若負數則歸零)
             data['domestic_inst'] = max(0, total_inst - data['foreign'])
-            
-        # 情況 B: FinMind 失敗 (外資為0)，但 YF 有總機構數據
         elif data['foreign'] == 0 and total_inst > 0:
-            # 經驗法則估算：60% 外資，40% 國內 (僅供參考)
-            data['foreign'] = total_inst * 0.6
+            data['foreign'] = total_inst * 0.6 # 估算
             data['domestic_inst'] = total_inst * 0.4
-            
-        # 只要有任一數據大於 0，就視為有效
+        
         if data['foreign'] > 0 or data['domestic_inst'] > 0 or data['directors'] > 0:
             data['valid'] = True
-            
     except: pass
     
     return data
 
-# --- V98 Legacy Chips (保留用於計算 AI 指標分數) ---
+# --- V98 Legacy Chips (用於 AI 訊號) ---
 @st.cache_data(ttl=3600)
 def get_chip_data(stock_id):
     try:
