@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 
-# --- CSS 優化: V101 戰情室風格 ---
+# --- CSS 優化: V102 戰情室風格 ---
 def inject_custom_css():
     st.markdown("""
         <style>
@@ -164,7 +164,7 @@ def render_radar_chart(scores):
     categories.append(categories[0]); values.append(values[0])
     fig = go.Figure()
     fig.add_trace(go.Scatterpolar(r=values, theta=categories, fill='toself', fillcolor='rgba(255, 43, 43, 0.4)', line=dict(color='#FF2B2B', width=2), name='個股評分'))
-    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 10], showticklabels=False, linecolor='#444'), bgcolor='rgba(0,0,0,0)'), margin=dict(l=20, r=20, t=20, b=20), height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False)
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 10], showticklabels=False, linecolor='#444'), bgcolor='rgba(0,0,0,0)'), margin=dict(l=20, r=20, t=20, b=20), height=250, paper_bgcolor='rgba(0,0,0,0)', showlegend=False)
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 # --- V96: 專業戰術分析引擎 ---
@@ -327,17 +327,17 @@ def render_detailed_card(*args, **kwargs): return False
 def render_term_card(t, c): st.info(f"{t}: {c}")
 def render_kline_pattern_card(t, d): st.write(t)
 
-# --- V101: 籌碼分佈渲染 (四大法人%) ---
+# --- V102: 籌碼分佈渲染 (四大法人% - 修正版) ---
 def render_shareholding_distribution(sh_data):
     if not sh_data: return
 
     st.subheader(f"🍰 籌碼結構分佈 (單位:%)")
     
-    # 建立數據
+    # 建立數據：為了確保正確性，不顯示猜測的投信/自營拆分，改為合併顯示「國內機構」
+    # 若未來有 API 支援精確拆分，可再展開
     items = [
         ("外資持股", sh_data.get("Foreign", 0), "#FF9F1C"),
-        ("投信持股 (估)", sh_data.get("Trust", 0), "#2B908F"),
-        ("自營商持股 (估)", sh_data.get("Dealer", 0), "#90EE90"),
+        ("國內機構 (投信/自營)", sh_data.get("Domestic_Inst", 0), "#2B908F"),
         ("董監持股", sh_data.get("Directors", 0), "#F45B69")
     ]
     
@@ -345,22 +345,25 @@ def render_shareholding_distribution(sh_data):
     
     with c1:
         for label, val, color in items:
-            st.markdown(f"""
-            <div class='chip-bar-label'><span>{label}</span><span>{val:.2f}%</span></div>
-            <div class='chip-progress'><div class='chip-fill' style='width:{min(val, 100)}%; background-color:{color};'></div></div>
-            """, unsafe_allow_html=True)
+            if val > 0: # 只顯示有數值的
+                st.markdown(f"""
+                <div class='chip-bar-label'><span>{label}</span><span>{val:.2f}%</span></div>
+                <div class='chip-progress'><div class='chip-fill' style='width:{min(val, 100)}%; background-color:{color};'></div></div>
+                """, unsafe_allow_html=True)
 
     with c2:
         # 繪製圓餅圖
-        labels = [i[0] for i in items]; values = [i[1] for i in items]
-        # 計算"其他/散戶"
+        labels = [i[0] for i in items if i[1] > 0]
+        values = [i[1] for i in items if i[1] > 0]
+        
+        # 計算"散戶/其他" (100% - 已知法人/董監)
         total_known = sum(values)
         if total_known < 100:
             labels.append("散戶/其他")
             values.append(100 - total_known)
             
-        fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=['#FF9F1C', '#2B908F', '#90EE90', '#F45B69', '#555555']))])
+        fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=['#FF9F1C', '#2B908F', '#F45B69', '#555555']))])
         fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=200, showlegend=True)
         st.plotly_chart(fig, use_container_width=True)
         
-    st.info("💡 **數據說明**：外資與董監持股為精確值；投信與自營商為機構持股之推估值，僅供參考。")
+    st.info("💡 **數據說明**：外資與董監持股為精確申報值；「國內機構」包含投信、自營商及其他國內法人機構。")
