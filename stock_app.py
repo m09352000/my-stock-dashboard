@@ -209,7 +209,7 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; st.query_params.clear(); nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 98.0 (Safe Boot 穩定版)")
+    st.markdown("---"); st.caption("Ver: 99.0 (Yield + Chip Dist)")
 
 mode = st.session_state['view_mode']
 
@@ -295,6 +295,10 @@ elif mode == 'analysis':
                 symbol_id = stock.ticker if hasattr(stock, 'ticker') else code
                 info = db.get_info_data(symbol_id) 
                 
+                # --- 新增：殖利率計算 ---
+                yield_raw = info.get('dividendYield', 0)
+                yield_val = yield_raw * 100 if yield_raw else 0
+                
                 shares = info.get('sharesOutstanding', 0)
                 curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]; chg = curr - prev; pct = (chg/prev)*100
                 vt = df['Volume'].iloc[-1]
@@ -317,11 +321,11 @@ elif mode == 'analysis':
                 
                 vol_r = vt/va; vs = "爆量 🔥" if vol_r>1.5 else ("量縮 💤" if vol_r<0.6 else "正常")
                 
-                # V97 關鍵修改：智慧隱藏
                 summary = db.translate_text(info.get('longBusinessSummary',''))
                 if summary: ui.render_company_profile(summary)
                 
-                ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf_str, vt, vy, va, vs, fh, turnover, bid_ask, color_settings, rt_pack, stock_info=info, df=df, chip_data=chip_data)
+                # --- 修改：傳入 yield_val ---
+                ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf_str, vt, vy, va, vs, fh, turnover, bid_ask, color_settings, rt_pack, stock_info=info, df=df, chip_data=chip_data, yield_val=yield_val)
                 ui.render_chart(df, f"{name} K線圖", color_settings)
                 
                 m5 = df['Close'].rolling(5).mean().iloc[-1]; m20 = df['Close'].rolling(20).mean().iloc[-1]; m60 = df['Close'].rolling(60).mean().iloc[-1]
@@ -329,6 +333,12 @@ elif mode == 'analysis':
                 rs = u.rolling(14).mean() / d.abs().rolling(14).mean(); rsi = (100 - 100/(1+rs)).iloc[-1]
                 bias = ((curr-m60)/m60)*100
                 ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df, chip_data=chip_data)
+                
+                # --- 新增：呼叫股權分散表渲染 ---
+                if code.isdigit():
+                    sh_data = db.get_shareholding_data(code)
+                    ui.render_shareholding_distribution(sh_data)
+
             ui.render_back_button(go_back)
             return is_live
 
