@@ -299,7 +299,7 @@ elif mode == 'analysis':
                     "pe": info.get('trailingPE'),
                     "pb": info.get('priceToBook'),
                     "rev_growth": info.get('revenueGrowth'),
-                    "mkt_cap": info.get('marketCap')
+                    "mkt_cap": info.get('marketCap') or 0 # Safety fix for NoneType
                 }
                 
                 shares = info.get('sharesOutstanding', 0)
