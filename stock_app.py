@@ -11,7 +11,6 @@ import importlib
 from datetime import datetime, time as dt_time, timedelta, timezone
 import difflib 
 
-# --- V90: 安全引入機制 ---
 try:
     import cv2
     import numpy as np
@@ -22,7 +21,6 @@ except ImportError:
 import stock_db as db
 import stock_ui as ui
 
-# 載入知識庫
 try:
     import knowledge
     importlib.reload(knowledge)
@@ -30,9 +28,8 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V106", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V107", layout="wide")
 
-# --- 通用字串比對 ---
 def find_best_match_stock_v90(text):
     garbage = ["試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存", "延遲", "放一", "一些", "一", "二", "三", "R", "G", "B"]
     clean_text = text.upper()
@@ -136,7 +133,6 @@ for k, v in defaults.items():
 
 check_session()
 
-# --- 初始化 ---
 status_container = st.empty()
 if not st.session_state['scan_pool']:
     status_container.info("🚀 系統初始化中，正在載入股票代碼，請稍候...")
@@ -173,7 +169,6 @@ def go_back():
     else: st.session_state['view_mode'] = 'welcome'
 
 def handle_search():
-    # 改用新的 key 避免衝突
     raw = st.session_state.sb_search_v106
     if raw:
         code, name = solve_stock_id(raw)
@@ -186,7 +181,6 @@ with st.sidebar:
     if uid: st.success(f"👤 {uid} (已登入)")
     else: st.info("👤 訪客模式")
     st.divider()
-    # V106 修正：更改 key 名稱，強制 Streamlit 重置此元件，解決 Duplicate Key Error
     st.text_input("🔍 搜尋 (支援股票/ETF)", key="sb_search_v106", on_change=handle_search)
     with st.container(border=True):
         st.markdown("### 🤖 AI 策略")
@@ -210,18 +204,18 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; st.query_params.clear(); nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 106.0 (Full Fix + UI Upgrade)")
+    st.markdown("---"); st.caption("Ver: 107.0 (K-Line Images Added)")
 
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V106")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V107")
     st.markdown("""
-    ### 🚀 V106 旗艦版更新 (Full Release)：
-    * 💰 **殖利率校正**：採用暴力回溯算法，精準鎖定最新年度現金股利 (如劍麟 $9.0)，並提供即時動態殖利率。
-    * 🍰 **真實籌碼透視**：混合 FinMind 與 Yahoo 數據，完整呈現「外資 / 國內法人 / 董監 / 散戶」結構，告別空白圖表。
-    * 📉 **專業多工線圖**：K線圖新增 MACD、RSI、KD 指標切換，支援多欄位同步分析，視覺化大升級。
-    * 🤖 **AI 戰略全開**：完整保留均線戰法、型態辨識與進出場建議，邏輯不簡化。
+    ### 🚀 V107 旗艦版更新 (教學圖解版)：
+    * 🕯️ **K線圖解實裝**：股市新手村的教學區現在會顯示動態繪製的 K 線型態圖，不再只有純文字。
+    * 💰 **殖利率校正**：採用暴力回溯算法，精準鎖定最新年度現金股利，並提供即時動態殖利率。
+    * 🍰 **真實籌碼透視**：混合 FinMind 與 Yahoo 數據，完整呈現「外資 / 國內法人 / 董監 / 散戶」結構。
+    * 📉 **專業多工線圖**：K線圖新增 MACD、RSI、KD 指標切換，視覺化大升級。
     """)
 
 elif mode == 'login':
@@ -301,7 +295,6 @@ elif mode == 'analysis':
                 symbol_id = stock.ticker if hasattr(stock, 'ticker') else code
                 info = db.get_info_data(symbol_id) 
                 
-                # --- V105: 確保每個指標都傳入且不為 None ---
                 curr = df['Close'].iloc[-1]
                 div_data = db.get_dividend_data(symbol_id, curr)
                 
@@ -323,7 +316,6 @@ elif mode == 'analysis':
                 fh = info.get('heldPercentInstitutions', 0)*100
                 color_settings = db.get_color_settings(code)
                 
-                # 確保 Chip Data 存在
                 chip_data = db.get_chip_data(code)
                 if not chip_data: chip_data = {"foreign": 0, "trust": 0, "dealer": 0, "date": ""}
                 
@@ -338,13 +330,11 @@ elif mode == 'analysis':
                 
                 vol_r = vt/va; vs = "爆量 🔥" if vol_r>1.5 else ("量縮 💤" if vol_r<0.6 else "正常")
                 
-                # 確保簡介區塊不被 try-except 吃掉
                 summary = db.translate_text(info.get('longBusinessSummary',''))
                 if summary: ui.render_company_profile(summary)
                 
                 ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf_str, vt, vy, va, vs, fh, turnover, bid_ask, color_settings, rt_pack, stock_info=info, df=df, chip_data=chip_data, metrics=metrics)
                 
-                # V106: 新版多指標 K線圖
                 ui.render_chart(df, f"{name} K線圖", color_settings)
                 
                 m5 = df['Close'].rolling(5).mean().iloc[-1]; m20 = df['Close'].rolling(20).mean().iloc[-1]; m60 = df['Close'].rolling(60).mean().iloc[-1]
@@ -353,7 +343,6 @@ elif mode == 'analysis':
                 bias = ((curr-m60)/m60)*100
                 ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df, chip_data=chip_data)
                 
-                # V105: 籌碼分佈 (混合式強制渲染)
                 if code.isdigit():
                     chip_dist = db.get_chip_distribution_v2(code, info)
                     ui.render_chip_structure(chip_dist)
