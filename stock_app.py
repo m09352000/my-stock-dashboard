@@ -209,7 +209,7 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; st.query_params.clear(); nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 99.0 (Yield + Chip Dist)")
+    st.markdown("---"); st.caption("Ver: 99.1 (Yield Fix + Chip)")
 
 mode = st.session_state['view_mode']
 
@@ -297,7 +297,7 @@ elif mode == 'analysis':
                 
                 # --- 新增：殖利率計算 ---
                 yield_raw = info.get('dividendYield', 0)
-                yield_val = yield_raw * 100 if yield_raw else 0
+                yield_val = yield_raw * 100 if yield_raw else None # 修正：若無資料則為 None
                 
                 shares = info.get('sharesOutstanding', 0)
                 curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]; chg = curr - prev; pct = (chg/prev)*100
@@ -334,8 +334,9 @@ elif mode == 'analysis':
                 bias = ((curr-m60)/m60)*100
                 ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df, chip_data=chip_data)
                 
-                # --- 新增：呼叫股權分散表渲染 ---
+                # --- 關鍵修正：呼叫股權分散表 (確保在所有 UI 之後) ---
                 if code.isdigit():
+                    # 這裡加入載入提示，確保使用者知道正在運作
                     sh_data = db.get_shareholding_data(code)
                     ui.render_shareholding_distribution(sh_data)
 
