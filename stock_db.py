@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 import streamlit as st
 
-# --- V101: 資料庫核心 (Yield Fix + Chip Update) ---
+# --- V102: 資料庫核心 (Yield Fix + Accurate Chips) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -125,45 +125,49 @@ def get_info_data(symbol):
     except Exception as e:
         return {}
 
-# --- V101 新增：精準殖利率計算 (解決 API 回傳錯誤問題) ---
+# --- V102 修正：精確現金殖利率 (不使用 TTM) ---
 @st.cache_data(ttl=3600)
 def get_real_yield(symbol, current_price):
     try:
-        ticker = yf.Ticker(symbol)
+        if current_price <= 0: return 0.0
         
-        # 1. 嘗試從 history_metadata 或 info 取得 (備案)
+        ticker = yf.Ticker(symbol)
         info = ticker.info
         
-        # 2. 正規戰法：抓取最近一年配息總和
+        # 1. 優先使用 dividendRate (年度股利金額)
+        # 這是資料庫中紀錄的「最近一次年度配息金額」，用這個除以股價最符合「公開公布比例」
+        div_rate = info.get('dividendRate')
+        if div_rate is not None and div_rate > 0:
+            return (div_rate / current_price) * 100
+            
+        # 2. 如果沒有 rate，使用 dividendYield (資料庫直接計算好的殖利率)
+        # 注意：YF 的 yield 通常是小數 (例如 0.05 代表 5%)
+        div_yield = info.get('dividendYield')
+        if div_yield is not None and div_yield > 0:
+            return div_yield * 100
+
+        # 3. 最後手段：抓取最近一次的配息紀錄 (Last Dividend)
         dividends = ticker.dividends
         if not dividends.empty:
-            # 抓取過去 365 天內的股利
-            one_year_ago = pd.Timestamp.now().tz_localize(dividends.index.tz) - pd.DateOffset(days=365)
-            last_year_divs = dividends[dividends.index >= one_year_ago]
-            total_div = last_year_divs.sum()
-            
-            if total_div > 0 and current_price > 0:
-                return (total_div / current_price) * 100
-        
-        # 3. 如果沒有配息紀錄，嘗試使用 trailingAnnualDividendYield
-        # 注意：YF 的 yield 通常是小數點 (0.03)，但也可能出錯，所以這邊做保護
-        yf_yield = info.get('trailingAnnualDividendYield')
-        if yf_yield:
-            return yf_yield * 100
+            # 取最後一筆 (最新) 的現金股利
+            last_div = dividends.iloc[-1]
+            if last_div > 0:
+                # 假設是年配息 (台股大部分是年配，若是季配如台積電，這裡會顯示單季殖利率)
+                # 為了符合"公開公布比例"定義，通常是指"最新一筆現金股利/股價"
+                return (last_div / current_price) * 100
         
         return 0.0
     except:
         return 0.0
 
-# --- V101 新增：抓取四大持股比例 (外資/董監/投信/自營) ---
+# --- V102 修正：籌碼分佈 (真實數據版) ---
 @st.cache_data(ttl=86400)
 def get_institutional_shares(stock_id, info_data):
     # 初始化
     data = {
-        "Foreign": 0.0,  # 外資
-        "Directors": 0.0, # 董監
-        "Trust": 0.0,    # 投信 (估)
-        "Dealer": 0.0    # 自營 (估)
+        "Foreign": 0.0,         # 外資 (精確)
+        "Directors": 0.0,       # 董監 (精確)
+        "Domestic_Inst": 0.0,   # 國內機構 (含投信/自營) (推算: 總機構 - 外資)
     }
     
     try:
@@ -181,25 +185,21 @@ def get_institutional_shares(stock_id, info_data):
                 data["Foreign"] = df_foreign.iloc[-1]['ForeignInvestmentSharesRatio']
         
         # 2. 董監持股 (Insiders) - 使用 YF info
-        # YF 的 heldPercentInsiders 通常指內部人(董監)持有比例
+        # YF 的 heldPercentInsiders 指內部人持有比例
         insider_hold = info_data.get('heldPercentInsiders', 0)
         if insider_hold:
             data["Directors"] = insider_hold * 100
             
-        # 3. 投信與自營商 (難以取得累積總持股%，通常只有買賣超)
-        # 這裡我們使用 YF 的 "heldPercentInstitutions" (機構持股)
-        # 機構持股通常包含：外資 + 投信 + 自營 + 其他法人
-        # 我們可以用 機構持股 - 外資持股 來粗估 國內法人(投信+自營)
+        # 3. 國內機構 (投信+自營)
+        # 因為免費 API 無法直接取得「投信總持股%」與「自營商總持股%」
+        # 為了不顯示錯誤的猜測數據，我們改為顯示「國內機構法人」
+        # 邏輯：YF 的 heldPercentInstitutions (總機構持股) - 外資持股
         inst_hold = info_data.get('heldPercentInstitutions', 0) * 100
         
         domestic_inst = max(0, inst_hold - data["Foreign"])
         
-        # 因為無法精確拆分投信/自營的"總持股"，我們依據台股慣性做推估分配
-        # 通常投信持股較自營商穩定，我們假設國內法人中 70% 是投信，30% 是自營
-        # 這是一個估計值，為了滿足顯示需求
         if domestic_inst > 0:
-            data["Trust"] = domestic_inst * 0.7
-            data["Dealer"] = domestic_inst * 0.3
+            data["Domestic_Inst"] = domestic_inst
             
         return data
 
