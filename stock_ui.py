@@ -241,7 +241,8 @@ def generate_detailed_advice(price, m5, m20, m60, rsi, tech_ind, chip_data=None)
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              turnover_rate, bid_ask_data, color_settings, 
-                             realtime_data=None, stock_info=None, df=None, chip_data=None):
+                             realtime_data=None, stock_info=None, df=None, chip_data=None, 
+                             yield_val=None):
     
     if realtime_data:
         curr = realtime_data['latest_trade_price']
@@ -255,10 +256,13 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         with c_main:
             st.markdown(f"<div style='font-size:1rem; color:#aaa'>成交價</div>", unsafe_allow_html=True)
             st.markdown(f"<span class='big-price' style='color:{color}'>{curr:.2f}</span> <span style='font-size:1.2rem; color:{color}'>{chg:+.2f} ({pct:+.2f}%)</span>", unsafe_allow_html=True)
-            m1, m2, m3 = st.columns(3)
+            m1, m2, m3, m4 = st.columns(4)
             m1.metric("最高", f"{high:.2f}")
             m2.metric("最低", f"{low:.2f}")
             m3.metric("成交量", f"{int(vol/1000)}K")
+            
+            y_str = f"{yield_val:.2f}%" if yield_val else "-"
+            m4.metric("殖利率", y_str)
             
             mf_color = "red" if "🔴" in main_force else ("green" if "🟢" in main_force else "gray")
             st.markdown(f"主力動向: <span style='color:{mf_color}; font-weight:bold'>{main_force}</span> | 量能: {vol_status}", unsafe_allow_html=True)
@@ -376,3 +380,47 @@ def render_company_profile(summary):
 def render_detailed_card(*args, **kwargs): return False
 def render_term_card(t, c): st.info(f"{t}: {c}")
 def render_kline_pattern_card(t, d): st.write(t)
+
+# --- V99: 籌碼分佈渲染 ---
+def render_shareholding_distribution(sh_data):
+    if not sh_data:
+        return
+
+    st.subheader(f"🍰 籌碼分佈 (股權分散) - {sh_data['date']}")
+    
+    df = sh_data['data']
+    c1, c2 = st.columns([1, 1])
+    
+    with c1:
+        st.caption("詳細分級表")
+        st.dataframe(
+            df.style.format({
+                "股東人數": "{:,}", 
+                "持股數量": "{:,}",
+                "持股比例(%)": "{:.2f}"
+            }).background_gradient(subset=['持股比例(%)'], cmap="Reds"),
+            use_container_width=True,
+            height=400,
+            hide_index=True
+        )
+
+    with c2:
+        st.caption("股權結構可視化 (前 8 大比例級距)")
+        top_5 = df.sort_values(by='持股比例(%)', ascending=False).head(8)
+        fig = go.Figure(go.Bar(
+            x=top_5['持股比例(%)'],
+            y=top_5['持股分級'],
+            orientation='h',
+            text=top_5['持股比例(%)'].apply(lambda x: f"{x:.2f}%"),
+            textposition='auto',
+            marker_color='#FF9F1C'
+        ))
+        fig.update_layout(
+            xaxis_title="比例 (%)",
+            yaxis=dict(autorange="reversed"),
+            height=400,
+            margin=dict(l=0, r=0, t=30, b=0)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.info("💡 **籌碼判讀技巧**：若「1,000,001以上」或高持股級距的比例持續增加，代表籌碼集中流向大戶，有利於股價穩定上漲；反之若「1-999」散戶比例增加，則籌碼趨於凌亂。")
