@@ -240,6 +240,7 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     pe = metrics.get('pe'); pe_str = f"{pe:.2f}" if pe else "-"
     pb = metrics.get('pb'); pb_str = f"{pb:.2f}" if pb else "-"
     
+    # 關鍵修正：確保市值不是 None
     cap_val = metrics.get('mkt_cap')
     if cap_val is None: cap_val = 0
     if cap_val > 1000000000000: cap_str = f"{cap_val/1000000000000:.2f}兆"
@@ -270,6 +271,7 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
             render_radar_chart(radar_scores)
     st.markdown("---")
 
+# --- V106: 籌碼分佈渲染 (強制顯示) ---
 def render_chip_structure(chip_dist):
     if not chip_dist: 
         st.warning("⚠️ 籌碼資料暫時無法取得，請稍後再試。")
@@ -358,7 +360,6 @@ def render_chart(df, title, color_settings):
     total_height = 500 + (num_sub * 150)
     
     # Row Heights 分配 (Plotly 需要比例)
-    # 假設 Main=0.5, Others split the rest? Plotly row_heights is relative.
     # 簡單做法：固定主圖比例較大。
     # 讓主圖佔 50%，剩下 50% 由副圖均分 (若有)。
     if num_sub == 0:
