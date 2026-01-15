@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 
-# --- CSS 優化: V103 戰情室風格 ---
+# --- CSS 優化: V104 戰情室風格 ---
 def inject_custom_css():
     st.markdown("""
         <style>
@@ -28,7 +28,6 @@ def inject_custom_css():
         /* 籌碼條 */
         .chip-bar-label { display: flex; justify-content: space-between; font-size: 0.9rem; color: #ddd; margin-bottom: 2px;}
         .chip-progress { height: 8px; background-color: #333; border-radius: 4px; overflow: hidden; margin-bottom: 10px; }
-        .chip-fill { height: 100%; border-radius: 4px; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -48,7 +47,6 @@ def render_header(title, show_monitor=False):
 def render_back_button(callback_func):
     if st.button("⬅️ 返回列表", use_container_width=True): callback_func()
 
-# --- 技術指標核心 ---
 def calculate_advanced_indicators(df):
     try:
         close = df['Close']
@@ -57,18 +55,15 @@ def calculate_advanced_indicators(df):
         macd = exp1 - exp2
         signal = macd.ewm(span=9, adjust=False).mean()
         hist = macd - signal
-        
         low_min = df['Low'].rolling(window=9).min()
         high_max = df['High'].rolling(window=9).max()
         rsv = (close - low_min) / (high_max - low_min) * 100
         k = rsv.ewm(com=2, adjust=False).mean()
         d = k.ewm(com=2, adjust=False).mean()
-        
         sma20 = close.rolling(window=20).mean()
         std20 = close.rolling(window=20).std()
         upper = sma20 + (std20 * 2)
         lower = sma20 - (std20 * 2)
-        
         return { "macd": macd.iloc[-1], "signal": signal.iloc[-1], "hist": hist.iloc[-1], "k": k.iloc[-1], "d": d.iloc[-1], "bb_upper": upper.iloc[-1], "bb_lower": lower.iloc[-1], "sma20": sma20.iloc[-1] }
     except: return None
 
@@ -80,7 +75,6 @@ def calculate_six_indicators(df, info, chip_data=None):
         ma5 = df['Close'].rolling(5).mean().iloc[-1]
         ma20 = df['Close'].rolling(20).mean().iloc[-1]
         ma60 = df['Close'].rolling(60).mean().iloc[-1]
-        
         if curr > ma5 > ma20 > ma60: scores["價量"] = 9 
         elif curr > ma20 and ma20 > ma60: scores["價量"] = 7 
         elif curr < ma5 < ma20 < ma60: scores["價量"] = 2 
@@ -113,7 +107,6 @@ def calculate_six_indicators(df, info, chip_data=None):
             if 0 < pe <= 15: scores["價值"] = 8 
             elif 15 < pe <= 25: scores["價值"] = 6 
             else: scores["價值"] = 4 
-            
             roe = info.get('returnOnEquity', 0)
             if roe > 0.15: scores["基本"] = 8
             elif roe > 0.05: scores["基本"] = 6
@@ -129,17 +122,14 @@ def render_radar_chart(scores):
     fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 10], showticklabels=False, linecolor='#444'), bgcolor='rgba(0,0,0,0)'), margin=dict(l=20, r=20, t=20, b=20), height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False)
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-# --- V96: 完整 AI 戰術分析引擎 ---
 def generate_detailed_advice(price, m5, m20, m60, rsi, tech_ind, chip_data=None):
     advice = {"action": "觀望", "color": "#888", "entry": "-", "exit": "-", "reason": "數據整理中", "signals": []}
     score = 0; signals = []
     
-    # 均線
     if price > m20: score += 1; signals.append(("均線", "站上月線", "bull"))
     else: signals.append(("均線", "月線反壓", "bear"))
     if m5 > m20: score += 1; signals.append(("短趨勢", "多頭排列", "bull"))
     
-    # 指標
     if tech_ind:
         if tech_ind['hist'] > 0: score += 1; signals.append(("MACD", "紅柱擴大", "bull"))
         else: signals.append(("MACD", "綠柱修正", "bear"))
@@ -149,13 +139,11 @@ def generate_detailed_advice(price, m5, m20, m60, rsi, tech_ind, chip_data=None)
         elif price < tech_ind['bb_lower']: signals.append(("布林", "觸及下軌", "bear"))
         else: signals.append(("布林", "通道內", "neutral"))
         
-    # 籌碼
     if chip_data:
         if chip_data['foreign'] > 500: score += 1; signals.append(("外資", "積極買超", "bull"))
         elif chip_data['foreign'] < -500: score -= 1; signals.append(("外資", "大幅調節", "bear"))
         else: signals.append(("外資", "動作不大", "neutral"))
     
-    # 綜合建議
     if score >= 3:
         advice["action"] = "🚀 強力買進"
         advice["color"] = "#FF2B2B"
@@ -189,10 +177,13 @@ def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df=None, chip_dat
         st.markdown(f"""<div class='tactic-card'><div class='tactic-header'>🎯 關鍵戰術</div><div class='tactic-row'><span>📥 建議進場</span><span class='tactic-val' style='color:#FF9F1C'>{advice['entry']}</span></div><div class='tactic-row'><span>🛡️ 停損防守</span><span class='tactic-val' style='color:#00E050'>{advice['exit']}</span></div><div class='tactic-row'><span>🚧 月線壓力</span><span class='tactic-val'>{m20:.2f}</span></div><div class='tactic-row'><span>🌊 季線支撐</span><span class='tactic-val'>{m60:.2f}</span></div></div>""", unsafe_allow_html=True)
     with c_right:
         st.markdown("#### 📡 訊號矩陣")
-        for name, value, status in advice['signals']:
-            color_cls = "bull" if status == "bull" else ("bear" if status == "bear" else "neutral")
-            icon = "🟢" if status == "bull" else ("🔴" if status == "bear" else "⚪")
-            st.markdown(f"""<div class='signal-box {color_cls}'><span class='signal-label'>{name}</span><span class='signal-value'>{icon} {value}</span></div>""", unsafe_allow_html=True)
+        if advice['signals']:
+            for name, value, status in advice['signals']:
+                color_cls = "bull" if status == "bull" else ("bear" if status == "bear" else "neutral")
+                icon = "🟢" if status == "bull" else ("🔴" if status == "bear" else "⚪")
+                st.markdown(f"""<div class='signal-box {color_cls}'><span class='signal-label'>{name}</span><span class='signal-value'>{icon} {value}</span></div>""", unsafe_allow_html=True)
+        else:
+            st.info("數據計算中...")
             
     if df is not None and len(df) >= 3:
         c1 = df.iloc[-1]; c2 = df.iloc[-2]
@@ -211,23 +202,15 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     radar_scores = calculate_six_indicators(df, stock_info, chip_data)
     color = "#FF2B2B" if chg > 0 else ("#00E050" if chg < 0 else "white")
     
-    # 安全取得基本面數據，若 metrics 為 None 則初始化為空字典
     if metrics is None: metrics = {}
-
     cash_div = metrics.get('cash_div', 0)
     yield_val = metrics.get('yield', 0)
     
-    # 使用 is not None 檢查，避免數值為 0 時被當作 False
-    pe = metrics.get('pe')
-    pe_str = f"{pe:.2f}" if pe is not None else "-"
+    pe = metrics.get('pe'); pe_str = f"{pe:.2f}" if pe else "-"
+    pb = metrics.get('pb'); pb_str = f"{pb:.2f}" if pb else "-"
     
-    pb = metrics.get('pb')
-    pb_str = f"{pb:.2f}" if pb is not None else "-"
-    
-    # 關鍵修復：市值 (Market Cap) 可能為 None，必須處理
     cap_val = metrics.get('mkt_cap')
     if cap_val is None: cap_val = 0
-    
     if cap_val > 1000000000000: cap_str = f"{cap_val/1000000000000:.2f}兆"
     elif cap_val > 100000000: cap_str = f"{cap_val/100000000:.2f}億"
     else: cap_str = "-"
@@ -236,7 +219,6 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
         c_main, c_radar = st.columns([1.8, 1])
         with c_main:
             st.markdown(f"<span class='big-price' style='color:{color}'>{curr:.2f}</span> <span style='font-size:1.2rem; color:{color}'>{chg:+.2f} ({pct:+.2f}%)</span>", unsafe_allow_html=True)
-            
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("最高", f"{high:.2f}")
             m2.metric("最低", f"{low:.2f}")
@@ -247,7 +229,7 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
             b1.metric("本益比", pe_str)
             b2.metric("淨值比", pb_str)
             b3.metric("現金股利", f"${cash_div:.2f}")
-            b4.metric("殖利率(動態)", f"{yield_val:.2f}%")
+            b4.metric("殖利率 (動態)", f"{yield_val:.2f}%")
 
             mf_color = "red" if "🔴" in main_force else ("green" if "🟢" in main_force else "gray")
             st.markdown(f"主力動向: <span style='color:{mf_color}; font-weight:bold'>{main_force}</span> | 量能: {vol_status}", unsafe_allow_html=True)
@@ -257,26 +239,28 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
             render_radar_chart(radar_scores)
     st.markdown("---")
 
-# --- V103: 籌碼分佈渲染 (FinMind 實時版) ---
+# --- V104: 籌碼分佈渲染 (強制顯示) ---
 def render_chip_structure(chip_dist):
-    if not chip_dist or not chip_dist.get("valid"):
+    # 移除嚴格的 valid 檢查，改為只要傳入就顯示
+    if not chip_dist: 
+        st.warning("⚠️ 籌碼資料暫時無法取得")
         return
 
-    st.subheader(f"🍰 籌碼結構分析")
+    st.subheader(f"🍰 籌碼結構分析 (外資/法人/散戶)")
     
     items = [
-        ("外資持股", chip_dist["foreign"], "#FF9F1C"),
-        ("本土主力/法人 (推估)", chip_dist["other_big"], "#2B908F"), # 大戶減外資
-        ("散戶 (<50張)", chip_dist["retail"], "#555555")
+        ("外資持股", chip_dist.get("foreign", 0), "#FF9F1C"),
+        ("國內法人 (投信/自營/其他)", chip_dist.get("domestic_inst", 0), "#2B908F"), 
+        ("董監持股", chip_dist.get("directors", 0), "#F45B69")
     ]
     
-    big_total = chip_dist["big_hands"]
+    # 計算散戶 (剩餘的)
+    known = sum([val for _, val, _ in items])
+    retail = max(0, 100 - known)
+    items.append(("散戶/其他", retail, "#555555"))
     
     c1, c2 = st.columns([1, 1])
     with c1:
-        st.markdown(f"#### 大戶籌碼集中度: **{big_total:.2f}%**")
-        st.caption("定義：持股 400 張以上之大股東總佔比")
-        
         for label, val, color in items:
             if val > 0:
                 st.markdown(f"""
@@ -285,13 +269,14 @@ def render_chip_structure(chip_dist):
                 """, unsafe_allow_html=True)
     
     with c2:
-        labels = [i[0] for i in items if i[1]>0]
-        values = [i[1] for i in items if i[1]>0]
-        fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=['#FF9F1C', '#2B908F', '#555555']))])
+        labels = [i[0] for i in items if i[1]>0.1]
+        values = [i[1] for i in items if i[1]>0.1]
+        colors = [i[2] for i in items if i[1]>0.1]
+        fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=colors))])
         fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=220, showlegend=True)
         st.plotly_chart(fig, use_container_width=True)
         
-    st.info("💡 **AI 解讀**：[外資] 為 FinMind 確切申報數據；[本土主力] 為 400張以上大戶扣除外資後的推估值 (含投信/自營/中實戶)。")
+    st.info("💡 **數據說明**：整合 FinMind 外資申報與 Yahoo 機構持股，並推算散戶比例。")
 
 def calculate_supertrend(df, period=10, multiplier=3):
     high = df['High'].values; low = df['Low'].values; close = df['Close'].values
