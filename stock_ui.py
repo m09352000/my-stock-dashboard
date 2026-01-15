@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 
-# --- CSS 優化: V108 戰情室風格 ---
+# --- CSS 優化 ---
 def inject_custom_css():
     st.markdown("""
         <style>
@@ -25,7 +25,6 @@ def inject_custom_css():
         .tactic-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 1rem; }
         .tactic-val { color: #eee; font-weight: bold; font-family: monospace; }
         
-        /* 籌碼條 */
         .chip-bar-label { display: flex; justify-content: space-between; font-size: 0.9rem; color: #ddd; margin-bottom: 2px;}
         .chip-progress { height: 8px; background-color: #333; border-radius: 4px; overflow: hidden; margin-bottom: 10px; }
         .chip-fill { height: 100%; border-radius: 4px; }
@@ -48,7 +47,6 @@ def render_header(title, show_monitor=False):
 def render_back_button(callback_func):
     if st.button("⬅️ 返回列表", use_container_width=True): callback_func()
 
-# --- 技術指標數列計算 ---
 def calculate_chart_indicators(df):
     exp1 = df['Close'].ewm(span=12, adjust=False).mean()
     exp2 = df['Close'].ewm(span=26, adjust=False).mean()
@@ -68,11 +66,7 @@ def calculate_chart_indicators(df):
     rs = u.rolling(window=14).mean() / d_loss.abs().rolling(window=14).mean()
     rsi = 100 - 100 / (1 + rs)
     
-    return {
-        "MACD": {"macd": macd, "signal": signal, "hist": hist},
-        "KD": {"k": k, "d": d},
-        "RSI": {"rsi": rsi}
-    }
+    return { "MACD": {"macd": macd, "signal": signal, "hist": hist}, "KD": {"k": k, "d": d}, "RSI": {"rsi": rsi} }
 
 def calculate_advanced_indicators(df):
     try:
@@ -216,7 +210,6 @@ def render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df=None, chip_dat
         c1 = df.iloc[-1]; c2 = df.iloc[-2]
         if c1['Close'] > c1['Open'] and c2['Close'] < c2['Open'] and c1['Close'] > c2['Open']: st.info("💡 K線偵測：今日出現 **多頭吞噬** 型態，短線轉強訊號。")
 
-# --- V108: 修正成交量顯示單位 ---
 def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force, 
                              vol, vol_yest, vol_avg, vol_status, foreign_held, 
                              turnover_rate, bid_ask_data, color_settings, 
@@ -250,8 +243,7 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("最高", f"{high:.2f}")
             m2.metric("最低", f"{low:.2f}")
-            # V108 修正：將 'K' 改為 '張'，並除以 1000 以符合台灣張數定義
-            m3.metric("成交量", f"{int(vol/1000):,} 張") 
+            m3.metric("成交量", f"{int(vol/1000):,} 張")
             m4.metric("總市值", cap_str)
             
             b1, b2, b3, b4 = st.columns(4)
@@ -303,6 +295,27 @@ def render_chip_structure(chip_dist):
         st.plotly_chart(fig, use_container_width=True)
         
     st.info("💡 **數據說明**：結合 FinMind 外資申報資料與 Yahoo 機構持股，自動補足缺漏數據，確保圖表完整。")
+
+def calculate_supertrend(df, period=10, multiplier=3):
+    high = df['High'].values; low = df['Low'].values; close = df['Close'].values
+    m1 = high - low; m2 = np.abs(high - np.roll(close, 1)); m3 = np.abs(low - np.roll(close, 1))
+    tr = np.maximum(m1, np.maximum(m2, m3)); tr[0] = 0
+    atr = np.zeros_like(close); atr[period-1] = np.mean(tr[:period])
+    for i in range(period, len(close)): atr[i] = (atr[i-1] * (period - 1) + tr[i]) / period
+    hl2 = (high + low) / 2
+    basic_upper = hl2 + (multiplier * atr); basic_lower = hl2 - (multiplier * atr)
+    final_upper = np.zeros_like(close); final_lower = np.zeros_like(close)
+    supertrend = np.zeros_like(close); trend = np.zeros_like(close)
+    for i in range(period, len(close)):
+        if basic_upper[i] < final_upper[i-1] or close[i-1] > final_upper[i-1]: final_upper[i] = basic_upper[i]
+        else: final_upper[i] = final_upper[i-1]
+        if basic_lower[i] > final_lower[i-1] or close[i-1] < final_lower[i-1]: final_lower[i] = basic_lower[i]
+        else: final_lower[i] = final_lower[i-1]
+        if len(close) > 0:
+            if trend[i-1] == 1: trend[i] = -1 if close[i] < final_lower[i] else 1
+            else: trend[i] = 1 if close[i] > final_upper[i] else -1
+        supertrend[i] = final_lower[i] if trend[i] == 1 else final_upper[i]
+    return supertrend, trend
 
 def render_chart(df, title, color_settings):
     df['MA5'] = df['Close'].rolling(5).mean()
@@ -363,6 +376,14 @@ def render_chart(df, title, color_settings):
 
     fig.update_layout(height=total_height, margin=dict(l=10, r=10, t=30, b=10), showlegend=True, xaxis_rangeslider_visible=False, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+# --- V109 關鍵修正：確保函式存在 ---
+def render_company_profile(summary):
+    if summary:
+        with st.expander("🏢 公司簡介 (AI 自動翻譯)"): st.write(summary)
+
+def render_detailed_card(*args, **kwargs): return False
+def render_term_card(t, c): st.info(f"{t}: {c}")
 
 def render_kline_pattern_card(name, details):
     with st.container():
