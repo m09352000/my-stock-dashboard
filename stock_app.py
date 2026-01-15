@@ -28,7 +28,7 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V100", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V101", layout="wide")
 
 def find_best_match_stock_v90(text):
     garbage = ["試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存", "延遲", "放一", "一些", "一", "二", "三", "R", "G", "B"]
@@ -204,7 +204,7 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; st.query_params.clear(); nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 100.0 (Metrics+Chip)")
+    st.markdown("---"); st.caption("Ver: 101.0 (Real Yield + Inst. Holdings)")
 
 mode = st.session_state['view_mode']
 
@@ -289,20 +289,17 @@ elif mode == 'analysis':
                 symbol_id = stock.ticker if hasattr(stock, 'ticker') else code
                 info = db.get_info_data(symbol_id) 
                 
-                # --- V100 新增: 五大基本面數據 ---
+                # --- V101: 改用 db.get_real_yield 取得正確殖利率 ---
+                curr = df['Close'].iloc[-1]
+                real_yield = db.get_real_yield(symbol_id, curr)
+                
                 metrics = {
-                    "yield": None,
+                    "yield": real_yield, # 這是正確的 %
                     "pe": info.get('trailingPE'),
                     "pb": info.get('priceToBook'),
                     "rev_growth": info.get('revenueGrowth'),
                     "mkt_cap": info.get('marketCap')
                 }
-
-                # 殖利率智慧修正：如果數值 > 10，假設已是 %，不乘 100；否則乘 100
-                raw_yield = info.get('dividendYield', 0)
-                if raw_yield:
-                    if raw_yield > 5: metrics['yield'] = raw_yield
-                    else: metrics['yield'] = raw_yield * 100
                 
                 shares = info.get('sharesOutstanding', 0)
                 curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]; chg = curr - prev; pct = (chg/prev)*100
@@ -329,7 +326,6 @@ elif mode == 'analysis':
                 summary = db.translate_text(info.get('longBusinessSummary',''))
                 if summary: ui.render_company_profile(summary)
                 
-                # 傳入 metrics
                 ui.render_metrics_dashboard(curr, chg, pct, high, low, amp, mf_str, vt, vy, va, vs, fh, turnover, bid_ask, color_settings, rt_pack, stock_info=info, df=df, chip_data=chip_data, metrics=metrics)
                 ui.render_chart(df, f"{name} K線圖", color_settings)
                 
@@ -339,10 +335,10 @@ elif mode == 'analysis':
                 bias = ((curr-m60)/m60)*100
                 ui.render_ai_report(curr, m5, m20, m60, rsi, bias, high, low, df, chip_data=chip_data)
                 
-                # --- 強制載入籌碼分佈 (放在最下方) ---
+                # --- V101: 呼叫四大法人持股渲染 ---
                 if code.isdigit():
-                    sh_data = db.get_shareholding_data(code)
-                    ui.render_shareholding_distribution(sh_data)
+                    inst_data = db.get_institutional_shares(code, info)
+                    ui.render_shareholding_distribution(inst_data)
 
             ui.render_back_button(go_back)
             return is_live
