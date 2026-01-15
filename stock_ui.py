@@ -261,7 +261,8 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
             m2.metric("最低", f"{low:.2f}")
             m3.metric("成交量", f"{int(vol/1000)}K")
             
-            y_str = f"{yield_val:.2f}%" if yield_val else "-"
+            # 確保有 % 數顯示
+            y_str = f"{yield_val:.2f}%" if yield_val is not None else "-"
             m4.metric("殖利率", y_str)
             
             mf_color = "red" if "🔴" in main_force else ("green" if "🟢" in main_force else "gray")
@@ -384,6 +385,7 @@ def render_kline_pattern_card(t, d): st.write(t)
 # --- V99: 籌碼分佈渲染 ---
 def render_shareholding_distribution(sh_data):
     if not sh_data:
+        # 如果沒有資料，也可以選擇顯示提示，這裡暫不顯示
         return
 
     st.subheader(f"🍰 籌碼分佈 (股權分散) - {sh_data['date']}")
