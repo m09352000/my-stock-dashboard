@@ -28,6 +28,7 @@ def inject_custom_css():
         /* 籌碼條 */
         .chip-bar-label { display: flex; justify-content: space-between; font-size: 0.9rem; color: #ddd; margin-bottom: 2px;}
         .chip-progress { height: 8px; background-color: #333; border-radius: 4px; overflow: hidden; margin-bottom: 10px; }
+        .chip-fill { height: 100%; border-radius: 4px; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -210,13 +211,23 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
     radar_scores = calculate_six_indicators(df, stock_info, chip_data)
     color = "#FF2B2B" if chg > 0 else ("#00E050" if chg < 0 else "white")
     
-    # 基本面數據
+    # 安全取得基本面數據，若 metrics 為 None 則初始化為空字典
+    if metrics is None: metrics = {}
+
     cash_div = metrics.get('cash_div', 0)
     yield_val = metrics.get('yield', 0)
-    pe = metrics.get('pe')
-    pb = metrics.get('pb')
     
-    cap_val = metrics.get('mkt_cap', 0)
+    # 使用 is not None 檢查，避免數值為 0 時被當作 False
+    pe = metrics.get('pe')
+    pe_str = f"{pe:.2f}" if pe is not None else "-"
+    
+    pb = metrics.get('pb')
+    pb_str = f"{pb:.2f}" if pb is not None else "-"
+    
+    # 關鍵修復：市值 (Market Cap) 可能為 None，必須處理
+    cap_val = metrics.get('mkt_cap')
+    if cap_val is None: cap_val = 0
+    
     if cap_val > 1000000000000: cap_str = f"{cap_val/1000000000000:.2f}兆"
     elif cap_val > 100000000: cap_str = f"{cap_val/100000000:.2f}億"
     else: cap_str = "-"
@@ -233,10 +244,8 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
             m4.metric("總市值", cap_str)
             
             b1, b2, b3, b4 = st.columns(4)
-            b1.metric("本益比", f"{pe:.2f}" if pe else "-")
-            b2.metric("淨值比", f"{pb:.2f}" if pb else "-")
-            
-            # 重點：顯示現金股利金額與殖利率
+            b1.metric("本益比", pe_str)
+            b2.metric("淨值比", pb_str)
             b3.metric("現金股利", f"${cash_div:.2f}")
             b4.metric("殖利率(動態)", f"{yield_val:.2f}%")
 
@@ -255,14 +264,12 @@ def render_chip_structure(chip_dist):
 
     st.subheader(f"🍰 籌碼結構分析")
     
-    # 數據準備
     items = [
         ("外資持股", chip_dist["foreign"], "#FF9F1C"),
         ("本土主力/法人 (推估)", chip_dist["other_big"], "#2B908F"), # 大戶減外資
         ("散戶 (<50張)", chip_dist["retail"], "#555555")
     ]
     
-    # 大戶總比例
     big_total = chip_dist["big_hands"]
     
     c1, c2 = st.columns([1, 1])
