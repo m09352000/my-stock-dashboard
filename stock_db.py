@@ -131,9 +131,7 @@ def get_chip_data(stock_id):
     try:
         if not stock_id.isdigit(): return None
         
-        # ⚠️ 關鍵：用到時才載入，避免開機卡死
         from FinMind.data import DataLoader
-        
         dl = DataLoader()
         start_date = (datetime.now() - timedelta(days=15)).strftime('%Y-%m-%d')
         df_inst = dl.taiwan_stock_institutional_investors(stock_id=stock_id, start_date=start_date)
@@ -157,25 +155,19 @@ def get_shareholding_data(stock_id):
     try:
         if not stock_id.isdigit(): return None
         
-        # 延遲載入以避免影響啟動速度
         from FinMind.data import DataLoader
         dl = DataLoader()
         
-        # 往回抓 45 天以確保涵蓋到最新的週資料 (有時候 FinMind 更新較慢)
-        start_date = (datetime.now() - timedelta(days=45)).strftime('%Y-%m-%d')
+        # 修正：往回抓 60 天，確保能抓到最新的週資料 (因為有時集保更新較慢)
+        start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
         
-        # 使用 FinMind 抓取股權分散表
         df = dl.taiwan_stock_shareholding(stock_id=stock_id, start_date=start_date)
         
         if not df.empty:
-            # 取得最新日期的資料
             latest_date = df['date'].max()
             df_latest = df[df['date'] == latest_date].copy()
-            
-            # 整理欄位顯示名稱
             df_latest = df_latest[['HoldingRange', 'people', 'unit', 'percent']]
             df_latest.columns = ['持股分級', '股東人數', '持股數量', '持股比例(%)']
-            
             return {"date": latest_date, "data": df_latest}
             
         return None
