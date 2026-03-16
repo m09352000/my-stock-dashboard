@@ -28,7 +28,7 @@ try:
 except:
     STOCK_TERMS = {}; STRATEGY_DESC = "System Loading..."; KLINE_PATTERNS = {}
 
-st.set_page_config(page_title="AI 股市戰情室 V112", layout="wide")
+st.set_page_config(page_title="AI 股市戰情室 V113", layout="wide")
 
 def find_best_match_stock_v90(text):
     garbage = ["試撮", "注意", "處置", "全額", "資券", "當沖", "商品", "群組", "成交", "漲跌", "幅度", "代號", "買進", "賣出", "總量", "強勢", "弱勢", "自選", "庫存", "延遲", "放一", "一些", "一", "二", "三", "R", "G", "B"]
@@ -170,10 +170,10 @@ def go_back():
     else: st.session_state['view_mode'] = 'welcome'
 
 def handle_search():
-    raw = st.session_state.sb_search_v112
+    raw = st.session_state.sb_search_v113
     if raw:
         code, name = solve_stock_id(raw)
-        if code: nav_to('analysis', code, name); st.session_state.sb_search_v112 = ""
+        if code: nav_to('analysis', code, name); st.session_state.sb_search_v113 = ""
         else: st.toast(f"找不到代號 '{raw}'", icon="⚠️")
 
 with st.sidebar:
@@ -183,7 +183,7 @@ with st.sidebar:
     else: st.info("👤 訪客模式")
     st.divider()
     
-    st.text_input("🔍 搜尋 (支援股票/ETF)", key="sb_search_v112", on_change=handle_search)
+    st.text_input("🔍 搜尋 (支援股票/ETF)", key="sb_search_v113", on_change=handle_search)
     
     with st.container(border=True):
         st.markdown("### 🤖 AI 策略")
@@ -200,9 +200,7 @@ with st.sidebar:
                 
     st.divider()
     
-    # --- V112 預警按鈕 ---
     if st.button("⚠️ 注意/處置股"): nav_to('warning'); st.rerun()
-    
     if st.button("📖 股市新手村"): nav_to('learn'); st.rerun()
     if st.button("🔒 個人自選股"): nav_to('watch'); st.rerun()
     if st.button("💬 戰友留言板"): nav_to('chat'); st.rerun()
@@ -212,24 +210,23 @@ with st.sidebar:
     else:
         if st.button("🚪 登出"): st.session_state['user_id']=None; st.session_state['watch_active']=False; st.query_params.clear(); nav_to('welcome'); st.rerun()
     if st.button("🏠 回首頁"): nav_to('welcome'); st.rerun()
-    st.markdown("---"); st.caption("Ver: 112.0 (Warning Prediction Center)")
+    st.markdown("---"); st.caption("Ver: 113.0 (Anti-Block Sync)")
 
 mode = st.session_state['view_mode']
 
 if mode == 'welcome':
-    ui.render_header("👋 歡迎來到 AI 股市戰情室 V112")
+    ui.render_header("👋 歡迎來到 AI 股市戰情室 V113")
     st.markdown("""
-    ### 🚀 V112 終極預警監控版：
-    * ⚠️ **警示股提前聽牌**：首創「預警系統」，自動抓出即將被關入「🔴 處置股」的高風險名單，並顯示預計列入時間。
-    * 🛠️ **連線突破**：修正證交所 API 防護阻擋問題，確保注意與處置名單 100% 成功抓取。
-    * 🕯️ **K線教學修復**：股市新手村的 K 線型態圖已恢復正常顯示。
-    * 💰 **殖利率校正**：採用暴力回溯算法，精準鎖定最新年度現金股利，並提供即時動態殖利率。
+    ### 🚀 V113 終極預警破防版：
+    * ⚠️ **警示股提前聽牌**：首創「預警系統」，自動抓出即將被關入「🔴 處置股」的高風險名單。
+    * 🛠️ **多層繞過技術**：導入全新網路模組，突破證交所防爬蟲機制，並加碼同步 **上櫃 (OTC)** 股票名單，資料 100% 掌握。
+    * 🕯️ **K線教學圖解**：股市新手村的 K 線型態圖完整支援。
+    * 💰 **精準殖利率**：採用暴力回溯算法，精準鎖定最新年度現金股利，並提供即時動態殖利率。
     """)
 
-# --- V112 異常股票預警中心 ---
 elif mode == 'warning':
     ui.render_header("⚠️ 證交所異常股票預警中心")
-    with st.spinner("正在突破證交所防護並同步最新資料..."):
+    with st.spinner("正在突破證交所防護並同步最新資料 (包含上市/上櫃)..."):
         df_warnings = db.get_warning_stocks()
     ui.render_warning_dashboard(df_warnings)
     ui.render_back_button(go_back)
