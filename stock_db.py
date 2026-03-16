@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 import streamlit as st
 
-# --- V110: 資料庫核心 (Deep Scan + Warning Stocks) ---
+# --- V112: 資料庫核心 (Deep Scan + Warning System V2) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -132,10 +132,8 @@ def get_dividend_data(symbol, current_price):
         if current_price <= 0: return data
         ticker = yf.Ticker(symbol)
         
-        # 策略 1: 直接讀取 info
         div_rate = ticker.info.get('dividendRate')
         
-        # 策略 2: 暴力掃描 dividends 歷史
         if not div_rate or div_rate == 0:
             hist = ticker.dividends
             if not hist.empty:
@@ -212,53 +210,77 @@ def get_chip_data(stock_id):
         return chip_data
     except: return None
 
-# --- V110 新增：證交所 注意/處置股 抓取模組 ---
-@st.cache_data(ttl=1800) # 快取 30 分鐘
+# --- V112 終極升級：證交所 注意/處置股 抓取與預警引擎 ---
+@st.cache_data(ttl=1800)
 def get_warning_stocks():
     results = []
+    # 加入 Headers 突破證交所防爬蟲機制
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
     try:
         # 1. 抓取 TWSE 處置股 (TWT43U)
         url_disp = "https://www.twse.com.tw/exchangeReport/TWT43U?response=json"
-        res_disp = requests.get(url_disp, timeout=5).json()
+        res_disp = requests.get(url_disp, headers=headers, timeout=10).json()
         if res_disp.get('stat') == 'OK':
             for row in res_disp.get('data', []):
-                # row[2] 是處置起迄時間 (例如 "112/08/01~112/08/14")
                 time_str = row[2].replace('民國', '').strip() if len(row) > 2 else ""
                 start_time = time_str.split('~')[0].strip() if '~' in time_str else time_str
                 end_time = time_str.split('~')[1].strip() if '~' in time_str else "-"
                 
                 results.append({
-                    "代號": row[0],
-                    "名稱": row[1],
-                    "狀態": "🔴 已處置 (關緊閉)",
-                    "列入時間": start_time,
-                    "預估解禁/處置日": f"預計 {end_time} 解禁",
+                    "代號": row[0], "名稱": row[1], "類別": "處置股",
+                    "狀態": "🔴 已處置 (分盤交易)",
+                    "確定列入時間": start_time,
+                    "預計解禁時間": end_time,
                     "原因": row[3] if len(row) > 3 else "達處置標準"
                 })
     except Exception as e:
         print(f"Fetch Disposition Error: {e}")
 
     try:
-        # 2. 抓取 TWSE 注意股 (TWT38U)
+        # 2. 抓取 TWSE 注意股 (TWT38U) 與 預測聽牌股
         url_att = "https://www.twse.com.tw/exchangeReport/TWT38U?response=json"
-        res_att = requests.get(url_att, timeout=5).json()
+        res_att = requests.get(url_att, headers=headers, timeout=10).json()
         if res_att.get('stat') == 'OK':
-            date_str = datetime.now().strftime("%Y/%m/%d")
+            # 取得官方資料日期
+            raw_date = str(res_att.get('date', datetime.now().strftime("%Y%m%d")))
+            if len(raw_date) == 8:
+                date_str = f"{int(raw_date[:4])}/{raw_date[4:6]}/{raw_date[6:]}"
+            else:
+                date_str = raw_date
+
             for row in res_att.get('data', []):
+                reason = row[2] if len(row) > 2 else "達注意標準"
+                
+                # --- AI 預警核心邏輯：判斷是否即將處置 (聽牌) ---
+                # 根據法規，若因「連續三個營業日」或「六個營業日」達標，隨時會進處置
+                is_warning = "連續三個營業日" in reason or "六個營業日" in reason
+                
+                if is_warning:
+                    results.append({
+                        "代號": row[0], "名稱": row[1], "類別": "預警股",
+                        "狀態": "🚨 處置聽牌 (高機率)",
+                        "確定列入時間": date_str,
+                        "預計解禁時間": "若明日續異常，即將列入處置",
+                        "原因": reason
+                    })
+                
+                # 同時它也是法定的注意股，放入名單
                 results.append({
-                    "代號": row[0],
-                    "名稱": row[1],
-                    "狀態": "🟡 注意股 (處置聽牌)",
-                    "列入時間": date_str,
-                    "預估解禁/處置日": "若續異常，隨時列處置",
-                    "原因": row[2] if len(row) > 2 else "達注意標準"
+                    "代號": row[0], "名稱": row[1], "類別": "注意股",
+                    "狀態": "🟡 已注意",
+                    "確定列入時間": date_str,
+                    "預計解禁時間": "視後續交易日表現",
+                    "原因": reason
                 })
     except Exception as e:
         print(f"Fetch Attention Error: {e}")
         
     df = pd.DataFrame(results)
     if df.empty:
-        return pd.DataFrame(columns=["代號", "名稱", "狀態", "列入時間", "預估解禁/處置日", "原因"])
+        return pd.DataFrame(columns=["代號", "名稱", "類別", "狀態", "確定列入時間", "預計解禁時間", "原因"])
     return df
 
 def get_color_settings(code):
