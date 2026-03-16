@@ -3,11 +3,12 @@ import twstock
 import yfinance as yf
 import os
 import json
+import requests
 from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 import streamlit as st
 
-# --- V109: 資料庫核心 (Deep Scan + Hybrid Chips) ---
+# --- V110: 資料庫核心 (Deep Scan + Warning Stocks) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -124,7 +125,6 @@ def get_info_data(symbol):
         return t.info if t.info else {}
     except: return {}
 
-# --- V106: 暴力股利搜尋 (確保抓到 9.0) ---
 @st.cache_data(ttl=3600)
 def get_dividend_data(symbol, current_price):
     data = {"cash_div": 0.0, "yield": 0.0}
@@ -147,7 +147,7 @@ def get_dividend_data(symbol, current_price):
                 recent = hist[hist.index >= one_year_ago]
                 
                 if not recent.empty: div_rate = recent.sum()
-                else: div_rate = hist.iloc[-1] # 抓最後一筆
+                else: div_rate = hist.iloc[-1]
 
         if div_rate and div_rate > 0:
             data["cash_div"] = float(div_rate)
@@ -156,18 +156,15 @@ def get_dividend_data(symbol, current_price):
         return data
     except: return data
 
-# --- V106: 混合式籌碼分佈 (外資+法人+董監) ---
 @st.cache_data(ttl=86400)
 def get_chip_distribution_v2(stock_id, info_data):
     data = { "foreign": 0.0, "directors": 0.0, "domestic_inst": 0.0, "valid": False }
     
-    # 1. 董監 (YF)
     try:
         insider = info_data.get('heldPercentInsiders', 0)
         if insider: data['directors'] = insider * 100
     except: pass
 
-    # 2. 外資 (FinMind)
     try:
         if stock_id.isdigit():
             from FinMind.data import DataLoader
@@ -179,13 +176,12 @@ def get_chip_distribution_v2(stock_id, info_data):
                 data['valid'] = True
     except: pass
 
-    # 3. 國內法人 (YF 機構 - FinMind 外資)
     try:
         total_inst = info_data.get('heldPercentInstitutions', 0) * 100
         if data['foreign'] > 0:
             data['domestic_inst'] = max(0, total_inst - data['foreign'])
         elif data['foreign'] == 0 and total_inst > 0:
-            data['foreign'] = total_inst * 0.6 # 估算
+            data['foreign'] = total_inst * 0.6 
             data['domestic_inst'] = total_inst * 0.4
         
         if data['foreign'] > 0 or data['domestic_inst'] > 0 or data['directors'] > 0:
@@ -194,7 +190,6 @@ def get_chip_distribution_v2(stock_id, info_data):
     
     return data
 
-# --- V98 Legacy Chips (用於 AI 訊號) ---
 @st.cache_data(ttl=3600)
 def get_chip_data(stock_id):
     try:
@@ -216,6 +211,55 @@ def get_chip_data(stock_id):
                 elif row['name'] == 'Dealer_Hedging': chip_data['dealer'] += int(net)
         return chip_data
     except: return None
+
+# --- V110 新增：證交所 注意/處置股 抓取模組 ---
+@st.cache_data(ttl=1800) # 快取 30 分鐘
+def get_warning_stocks():
+    results = []
+    try:
+        # 1. 抓取 TWSE 處置股 (TWT43U)
+        url_disp = "https://www.twse.com.tw/exchangeReport/TWT43U?response=json"
+        res_disp = requests.get(url_disp, timeout=5).json()
+        if res_disp.get('stat') == 'OK':
+            for row in res_disp.get('data', []):
+                # row[2] 是處置起迄時間 (例如 "112/08/01~112/08/14")
+                time_str = row[2].replace('民國', '').strip() if len(row) > 2 else ""
+                start_time = time_str.split('~')[0].strip() if '~' in time_str else time_str
+                end_time = time_str.split('~')[1].strip() if '~' in time_str else "-"
+                
+                results.append({
+                    "代號": row[0],
+                    "名稱": row[1],
+                    "狀態": "🔴 已處置 (關緊閉)",
+                    "列入時間": start_time,
+                    "預估解禁/處置日": f"預計 {end_time} 解禁",
+                    "原因": row[3] if len(row) > 3 else "達處置標準"
+                })
+    except Exception as e:
+        print(f"Fetch Disposition Error: {e}")
+
+    try:
+        # 2. 抓取 TWSE 注意股 (TWT38U)
+        url_att = "https://www.twse.com.tw/exchangeReport/TWT38U?response=json"
+        res_att = requests.get(url_att, timeout=5).json()
+        if res_att.get('stat') == 'OK':
+            date_str = datetime.now().strftime("%Y/%m/%d")
+            for row in res_att.get('data', []):
+                results.append({
+                    "代號": row[0],
+                    "名稱": row[1],
+                    "狀態": "🟡 注意股 (處置聽牌)",
+                    "列入時間": date_str,
+                    "預估解禁/處置日": "若續異常，隨時列處置",
+                    "原因": row[2] if len(row) > 2 else "達注意標準"
+                })
+    except Exception as e:
+        print(f"Fetch Attention Error: {e}")
+        
+    df = pd.DataFrame(results)
+    if df.empty:
+        return pd.DataFrame(columns=["代號", "名稱", "狀態", "列入時間", "預估解禁/處置日", "原因"])
+    return df
 
 def get_color_settings(code):
     return {'up': 'red', 'down': 'green', 'delta': 'inverse'}
