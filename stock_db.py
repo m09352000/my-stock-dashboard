@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 import streamlit as st
 
-# --- V112: 資料庫核心 (Deep Scan + Warning System V2) ---
+# --- V113: 資料庫核心 (OpenAPI Bypass + OTC Sync) ---
 
 USERS_FILE = 'stock_users.json'
 WATCHLIST_FILE = 'stock_watchlist.json'
@@ -210,77 +210,113 @@ def get_chip_data(stock_id):
         return chip_data
     except: return None
 
-# --- V112 終極升級：證交所 注意/處置股 抓取與預警引擎 ---
+# --- V113 終極突破防線版：注意/處置股 同步引擎 ---
 @st.cache_data(ttl=1800)
 def get_warning_stocks():
     results = []
-    # 加入 Headers 突破證交所防爬蟲機制
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
     
-    try:
-        # 1. 抓取 TWSE 處置股 (TWT43U)
-        url_disp = "https://www.twse.com.tw/exchangeReport/TWT43U?response=json"
-        res_disp = requests.get(url_disp, headers=headers, timeout=10).json()
-        if res_disp.get('stat') == 'OK':
-            for row in res_disp.get('data', []):
-                time_str = row[2].replace('民國', '').strip() if len(row) > 2 else ""
+    # 使用 urllib 與特定 Header 來繞過 Cloudflare 針對 requests 的基本阻擋
+    def fetch_twse_secure(url):
+        import urllib.request
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Referer': 'https://www.twse.com.tw/zh/announcement/punish.html',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'X-Requested-With': 'XMLHttpRequest'
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                return json.loads(response.read().decode('utf-8'))
+        except: return None
+
+    # 1. 抓取 TWSE 處置股 (上市)
+    res_disp = fetch_twse_secure("https://www.twse.com.tw/exchangeReport/TWT43U?response=json")
+    if res_disp and res_disp.get('stat') == 'OK':
+        for row in res_disp.get('data', []):
+            time_str = row[2].replace('民國', '').strip() if len(row) > 2 else ""
+            start_time = time_str.split('~')[0].strip() if '~' in time_str else time_str
+            end_time = time_str.split('~')[1].strip() if '~' in time_str else "-"
+            results.append({
+                "代號": row[0], "名稱": row[1], "類別": "處置股",
+                "狀態": "🔴 已處置 (上市)", "確定列入時間": start_time,
+                "預計解禁時間": end_time, "原因": row[3] if len(row) > 3 else "達處置標準"
+            })
+    else:
+        # 【突破點】如果主站仍阻擋，直接切換到 TWSE OpenAPI (無防爬蟲限制)
+        try:
+            res_open = requests.get("https://openapi.twse.com.tw/v1/announcement/punish", timeout=5).json()
+            for row in res_open:
+                vals = list(row.values())
+                time_str = vals[2].replace('民國', '').strip() if len(vals) > 2 else ""
                 start_time = time_str.split('~')[0].strip() if '~' in time_str else time_str
                 end_time = time_str.split('~')[1].strip() if '~' in time_str else "-"
-                
                 results.append({
-                    "代號": row[0], "名稱": row[1], "類別": "處置股",
-                    "狀態": "🔴 已處置 (分盤交易)",
-                    "確定列入時間": start_time,
-                    "預計解禁時間": end_time,
-                    "原因": row[3] if len(row) > 3 else "達處置標準"
+                    "代號": vals[0], "名稱": vals[1], "類別": "處置股",
+                    "狀態": "🔴 已處置 (上市)", "確定列入時間": start_time,
+                    "預計解禁時間": end_time, "原因": vals[3] if len(vals) > 3 else "達處置標準"
                 })
-    except Exception as e:
-        print(f"Fetch Disposition Error: {e}")
+        except: pass
 
-    try:
-        # 2. 抓取 TWSE 注意股 (TWT38U) 與 預測聽牌股
-        url_att = "https://www.twse.com.tw/exchangeReport/TWT38U?response=json"
-        res_att = requests.get(url_att, headers=headers, timeout=10).json()
-        if res_att.get('stat') == 'OK':
-            # 取得官方資料日期
-            raw_date = str(res_att.get('date', datetime.now().strftime("%Y%m%d")))
-            if len(raw_date) == 8:
-                date_str = f"{int(raw_date[:4])}/{raw_date[4:6]}/{raw_date[6:]}"
-            else:
-                date_str = raw_date
-
-            for row in res_att.get('data', []):
-                reason = row[2] if len(row) > 2 else "達注意標準"
-                
-                # --- AI 預警核心邏輯：判斷是否即將處置 (聽牌) ---
-                # 根據法規，若因「連續三個營業日」或「六個營業日」達標，隨時會進處置
+    # 2. 抓取 TWSE 注意股 (上市)
+    res_att = fetch_twse_secure("https://www.twse.com.tw/exchangeReport/TWT38U?response=json")
+    if res_att and res_att.get('stat') == 'OK':
+        raw_date = str(res_att.get('date', datetime.now().strftime("%Y%m%d")))
+        date_str = f"{int(raw_date[:4])}/{raw_date[4:6]}/{raw_date[6:]}" if len(raw_date) == 8 else raw_date
+        for row in res_att.get('data', []):
+            reason = row[2] if len(row) > 2 else "達注意標準"
+            is_warning = "連續三個營業日" in reason or "六個營業日" in reason
+            if is_warning:
+                results.append({"代號": row[0], "名稱": row[1], "類別": "預警股", "狀態": "🚨 處置聽牌 (上市)", "確定列入時間": date_str, "預計解禁時間": "若明日續異常，即將處置", "原因": reason})
+            results.append({"代號": row[0], "名稱": row[1], "類別": "注意股", "狀態": "🟡 已注意 (上市)", "確定列入時間": date_str, "預計解禁時間": "視後續表現", "原因": reason})
+    else:
+        # 【突破點】OpenAPI 備援
+        try:
+            res_open = requests.get("https://openapi.twse.com.tw/v1/exchangeReport/TWT38U", timeout=5).json()
+            date_str = datetime.now().strftime("%Y/%m/%d")
+            for row in res_open:
+                vals = list(row.values())
+                reason = vals[2] if len(vals) > 2 else "達注意標準"
                 is_warning = "連續三個營業日" in reason or "六個營業日" in reason
-                
                 if is_warning:
-                    results.append({
-                        "代號": row[0], "名稱": row[1], "類別": "預警股",
-                        "狀態": "🚨 處置聽牌 (高機率)",
-                        "確定列入時間": date_str,
-                        "預計解禁時間": "若明日續異常，即將列入處置",
-                        "原因": reason
-                    })
-                
-                # 同時它也是法定的注意股，放入名單
-                results.append({
-                    "代號": row[0], "名稱": row[1], "類別": "注意股",
-                    "狀態": "🟡 已注意",
-                    "確定列入時間": date_str,
-                    "預計解禁時間": "視後續交易日表現",
-                    "原因": reason
-                })
-    except Exception as e:
-        print(f"Fetch Attention Error: {e}")
-        
+                    results.append({"代號": vals[0], "名稱": vals[1], "類別": "預警股", "狀態": "🚨 處置聽牌 (上市)", "確定列入時間": date_str, "預計解禁時間": "若明日續異常，即將處置", "原因": reason})
+                results.append({"代號": vals[0], "名稱": vals[1], "類別": "注意股", "狀態": "🟡 已注意 (上市)", "確定列入時間": date_str, "預計解禁時間": "視後續表現", "原因": reason})
+        except: pass
+
+    # 3. 抓取 TPEx 處置股 (上櫃 - 加碼功能，直接用櫃買 OpenAPI 不會擋)
+    try:
+        res_tpex = requests.get("https://www.tpex.org.tw/openapi/v1/tpex_disposal_information", timeout=5).json()
+        for row in res_tpex:
+            vals = list(row.values())
+            time_str = vals[2].replace('民國', '').strip() if len(vals) > 2 else ""
+            start_time = time_str.split('~')[0].strip() if '~' in time_str else time_str
+            end_time = time_str.split('~')[1].strip() if '~' in time_str else "-"
+            results.append({
+                "代號": vals[0], "名稱": vals[1], "類別": "處置股",
+                "狀態": "🔴 已處置 (上櫃)", "確定列入時間": start_time,
+                "預計解禁時間": end_time, "原因": vals[3] if len(vals) > 3 else "達處置標準"
+            })
+    except: pass
+
+    # 4. 抓取 TPEx 注意股 (上櫃)
+    try:
+        res_tpex_att = requests.get("https://www.tpex.org.tw/openapi/v1/tpex_trading_warning_information", timeout=5).json()
+        date_str = datetime.now().strftime("%Y/%m/%d")
+        for row in res_tpex_att:
+            vals = list(row.values())
+            reason = vals[2] if len(vals) > 2 else "達注意標準"
+            is_warning = "連續三個營業日" in reason or "六個營業日" in reason
+            if is_warning:
+                results.append({"代號": vals[0], "名稱": vals[1], "類別": "預警股", "狀態": "🚨 處置聽牌 (上櫃)", "確定列入時間": date_str, "預計解禁時間": "若明日續異常，即將處置", "原因": reason})
+            results.append({"代號": vals[0], "名稱": vals[1], "類別": "注意股", "狀態": "🟡 已注意 (上櫃)", "確定列入時間": date_str, "預計解禁時間": "視後續表現", "原因": reason})
+    except: pass
+
     df = pd.DataFrame(results)
-    if df.empty:
-        return pd.DataFrame(columns=["代號", "名稱", "類別", "狀態", "確定列入時間", "預計解禁時間", "原因"])
+    if not df.empty:
+        # 移除可能因多管道重複抓取的資料
+        df = df.drop_duplicates(subset=['代號', '類別'])
+    else:
+        df = pd.DataFrame(columns=["代號", "名稱", "類別", "狀態", "確定列入時間", "預計解禁時間", "原因"])
+        
     return df
 
 def get_color_settings(code):
