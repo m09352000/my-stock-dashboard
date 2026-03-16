@@ -243,7 +243,7 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("最高", f"{high:.2f}")
             m2.metric("最低", f"{low:.2f}")
-            m3.metric("成交量", f"{int(vol):,} 張") 
+            m3.metric("成交量", f"{int(vol/1000):,} 張")
             m4.metric("總市值", cap_str)
             
             b1, b2, b3, b4 = st.columns(4)
@@ -362,3 +362,95 @@ def render_chart(df, title, color_settings):
             m = ind_data["MACD"]
             hist_colors = ['#FF2B2B' if v >= 0 else '#00E050' for v in m['hist']]
             fig.add_trace(go.Bar(x=df.index, y=m['hist'], marker_color=hist_colors, name='MACD柱'), row=r, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=m['macd'], line=dict(color='#FFD700', width=1), name='DIF'), row=r, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=m['signal'], line=dict(color='#00FFFF', width=1), name='DEA'), row=r, col=1)
+        elif ind == "KD":
+            k_val = ind_data["KD"]["k"]; d_val = ind_data["KD"]["d"]
+            fig.add_trace(go.Scatter(x=df.index, y=k_val, line=dict(color='#FFA500', width=1), name='K值'), row=r, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=d_val, line=dict(color='#00FFFF', width=1), name='D值'), row=r, col=1)
+        elif ind == "RSI":
+            r_val = ind_data["RSI"]["rsi"]
+            fig.add_trace(go.Scatter(x=df.index, y=r_val, line=dict(color='#D8BFD8', width=1), name='RSI'), row=r, col=1)
+            fig.add_hline(y=70, line_dash="dot", line_color="red", row=r, col=1)
+            fig.add_hline(y=30, line_dash="dot", line_color="green", row=r, col=1)
+
+    fig.update_layout(height=total_height, margin=dict(l=10, r=10, t=30, b=10), showlegend=True, xaxis_rangeslider_visible=False, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+def render_company_profile(summary):
+    if summary:
+        with st.expander("🏢 公司簡介 (AI 自動翻譯)"): st.write(summary)
+
+def render_detailed_card(*args, **kwargs): return False
+def render_term_card(t, c): st.info(f"{t}: {c}")
+
+def render_kline_pattern_card(name, details):
+    with st.container():
+        st.subheader(f"🕯️ {name}")
+        c1, c2 = st.columns([1.5, 1])
+        
+        with c1:
+            st.markdown(f"**【型態特徵】**")
+            st.write(details['morphology'])
+            st.markdown(f"**【投資心理】**")
+            st.write(details['psychology'])
+            st.markdown(f"**【操作策略】**")
+            st.markdown(details['action'], unsafe_allow_html=True)
+
+        with c2:
+            raw = details['data']
+            opens = [d[0] for d in raw]
+            highs = [d[1] for d in raw]
+            lows = [d[2] for d in raw]
+            closes = [d[3] for d in raw]
+            dates = [f"D{i+1}" for i in range(len(raw))]
+            
+            fig = go.Figure(data=[go.Candlestick(
+                x=dates, open=opens, high=highs, low=lows, close=closes,
+                increasing_line_color='#FF2B2B', decreasing_line_color='#00E050'
+            )])
+            
+            fig.update_layout(
+                margin=dict(t=20, b=20, l=20, r=20),
+                height=300,
+                xaxis_rangeslider_visible=False,
+                plot_bgcolor='#1E1E1E',
+                paper_bgcolor='#1E1E1E',
+                font=dict(color='white'),
+                xaxis=dict(showgrid=False, visible=False),
+                yaxis=dict(showgrid=True, gridcolor='#333')
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        st.divider()
+
+# --- V110 新增：證交所 注意/處置股 監控版面 ---
+def render_warning_dashboard(df_warnings):
+    st.subheader("⚠️ 注意與處置股票監控 (上市)")
+    st.info("💡 **名詞解釋**：當股票漲跌幅或交易量異常時，會先被列為「🟡 注意股」。若連續多日達標，則會被關入「🔴 處置股」進行分盤交易（俗稱關緊閉）。")
+    
+    if df_warnings is None or df_warnings.empty:
+        st.success("🎉 今日目前無上市注意或處置股票，或證交所連線維護中。")
+        return
+        
+    c1, c2 = st.columns(2)
+    disp_count = len(df_warnings[df_warnings['狀態'].str.contains('處置')])
+    att_count = len(df_warnings[df_warnings['狀態'].str.contains('注意')])
+    
+    c1.metric("🔴 目前處置股數量", f"{disp_count} 檔")
+    c2.metric("🟡 目前注意股數量", f"{att_count} 檔")
+    
+    st.markdown("#### 📋 最新監控清單")
+    # 將 DataFrame 的樣式做一點簡單的顏色區分
+    def color_status(val):
+        if '處置' in val: return 'color: #FF2B2B; font-weight: bold'
+        elif '注意' in val: return 'color: #FF9F1C; font-weight: bold'
+        return ''
+        
+    styled_df = df_warnings.style.map(color_status, subset=['狀態'])
+    
+    st.dataframe(
+        styled_df,
+        use_container_width=True,
+        hide_index=True,
+        height=600
+    )
