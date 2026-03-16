@@ -423,21 +423,19 @@ def render_kline_pattern_card(name, details):
             st.plotly_chart(fig, use_container_width=True)
         st.divider()
 
-# --- V112 終極升級：警告儀表板分區渲染 ---
+# --- V113 更新副標題 ---
 def render_warning_dashboard(df_warnings):
-    st.subheader("⚠️ 異常股票預警與監控中心")
+    st.subheader("⚠️ 異常股票預警與監控中心 (上市/上櫃)")
     st.info("💡 **系統說明**：本系統即時連線證交所。不僅顯示「目前確定」的名單，還會自動分析注意股的原因，為您提前揪出「🚨 即將被處置關緊閉」的聽牌預警股！")
     
     if df_warnings is None or df_warnings.empty:
-        st.success("🎉 今日目前無上市異常股票，或證交所非交易時間尚未更新。")
+        st.success("🎉 今日目前無上市異常股票，或交易所非交易時間尚未更新。")
         return
         
-    # 將名單分類
     df_pred = df_warnings[df_warnings['類別'] == '預警股'].drop(columns=['類別'])
     df_disp = df_warnings[df_warnings['類別'] == '處置股'].drop(columns=['類別'])
     df_att = df_warnings[df_warnings['類別'] == '注意股'].drop(columns=['類別'])
     
-    # 統計指標
     c1, c2, c3 = st.columns(3)
     c1.metric("🚨 處置聽牌預警", f"{len(df_pred)} 檔")
     c2.metric("🔴 目前處置股", f"{len(df_disp)} 檔")
@@ -447,7 +445,6 @@ def render_warning_dashboard(df_warnings):
     st.markdown("### 🎯 提前預警：即將列入處置的高風險名單 (聽牌區)")
     if not df_pred.empty:
         st.error("⚠️ 以下股票已連續多日觸發異常，若明日走勢續強或續弱，極可能被列入【🔴 處置股】關緊閉！")
-        # 套用樣式
         st.dataframe(
             df_pred.style.map(lambda x: 'color: #FF9F1C; font-weight: bold', subset=['狀態']),
             use_container_width=True, hide_index=True
