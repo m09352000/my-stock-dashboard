@@ -243,7 +243,7 @@ def render_metrics_dashboard(curr, chg, pct, high, low, amp, main_force,
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("最高", f"{high:.2f}")
             m2.metric("最低", f"{low:.2f}")
-            m3.metric("成交量", f"{int(vol/1000):,} 張")
+            m3.metric("成交量", f"{int(vol):,} 張")
             m4.metric("總市值", cap_str)
             
             b1, b2, b3, b4 = st.columns(4)
@@ -423,34 +423,54 @@ def render_kline_pattern_card(name, details):
             st.plotly_chart(fig, use_container_width=True)
         st.divider()
 
-# --- V110 新增：證交所 注意/處置股 監控版面 ---
+# --- V112 終極升級：警告儀表板分區渲染 ---
 def render_warning_dashboard(df_warnings):
-    st.subheader("⚠️ 注意與處置股票監控 (上市)")
-    st.info("💡 **名詞解釋**：當股票漲跌幅或交易量異常時，會先被列為「🟡 注意股」。若連續多日達標，則會被關入「🔴 處置股」進行分盤交易（俗稱關緊閉）。")
+    st.subheader("⚠️ 異常股票預警與監控中心")
+    st.info("💡 **系統說明**：本系統即時連線證交所。不僅顯示「目前確定」的名單，還會自動分析注意股的原因，為您提前揪出「🚨 即將被處置關緊閉」的聽牌預警股！")
     
     if df_warnings is None or df_warnings.empty:
-        st.success("🎉 今日目前無上市注意或處置股票，或證交所連線維護中。")
+        st.success("🎉 今日目前無上市異常股票，或證交所非交易時間尚未更新。")
         return
         
-    c1, c2 = st.columns(2)
-    disp_count = len(df_warnings[df_warnings['狀態'].str.contains('處置')])
-    att_count = len(df_warnings[df_warnings['狀態'].str.contains('注意')])
+    # 將名單分類
+    df_pred = df_warnings[df_warnings['類別'] == '預警股'].drop(columns=['類別'])
+    df_disp = df_warnings[df_warnings['類別'] == '處置股'].drop(columns=['類別'])
+    df_att = df_warnings[df_warnings['類別'] == '注意股'].drop(columns=['類別'])
     
-    c1.metric("🔴 目前處置股數量", f"{disp_count} 檔")
-    c2.metric("🟡 目前注意股數量", f"{att_count} 檔")
+    # 統計指標
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🚨 處置聽牌預警", f"{len(df_pred)} 檔")
+    c2.metric("🔴 目前處置股", f"{len(df_disp)} 檔")
+    c3.metric("🟡 目前注意股", f"{len(df_att)} 檔")
     
-    st.markdown("#### 📋 最新監控清單")
-    # 將 DataFrame 的樣式做一點簡單的顏色區分
-    def color_status(val):
-        if '處置' in val: return 'color: #FF2B2B; font-weight: bold'
-        elif '注意' in val: return 'color: #FF9F1C; font-weight: bold'
-        return ''
+    st.markdown("---")
+    st.markdown("### 🎯 提前預警：即將列入處置的高風險名單 (聽牌區)")
+    if not df_pred.empty:
+        st.error("⚠️ 以下股票已連續多日觸發異常，若明日走勢續強或續弱，極可能被列入【🔴 處置股】關緊閉！")
+        # 套用樣式
+        st.dataframe(
+            df_pred.style.map(lambda x: 'color: #FF9F1C; font-weight: bold', subset=['狀態']),
+            use_container_width=True, hide_index=True
+        )
+    else:
+        st.success("目前無處置聽牌之高風險股票。")
         
-    styled_df = df_warnings.style.map(color_status, subset=['狀態'])
-    
-    st.dataframe(
-        styled_df,
-        use_container_width=True,
-        hide_index=True,
-        height=600
-    )
+    st.markdown("---")
+    st.markdown("### 🔴 確定名單：目前處置股 (已關緊閉)")
+    if not df_disp.empty:
+        st.dataframe(
+            df_disp.style.map(lambda x: 'color: #FF2B2B; font-weight: bold', subset=['狀態']),
+            use_container_width=True, hide_index=True
+        )
+    else:
+        st.success("目前無處置中股票。")
+
+    st.markdown("---")
+    st.markdown("### 🟡 確定名單：目前注意股 (黃牌警告)")
+    if not df_att.empty:
+        st.dataframe(
+            df_att.style.map(lambda x: 'color: #FF9F1C', subset=['狀態']),
+            use_container_width=True, hide_index=True
+        )
+    else:
+        st.success("目前無注意股。")
